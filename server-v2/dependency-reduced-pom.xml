@@ -20,7 +20,7 @@
             <configuration>
               <transformers>
                 <transformer>
-                  <mainClass>com.chatflow.ChatServer</mainClass>
+                  <mainClass>com.chatflow.server.ChatServer</mainClass>
                 </transformer>
                 <transformer />
               </transformers>

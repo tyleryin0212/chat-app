@@ -1,4 +1,4 @@
-package com.chatflow;
+package com.chatflow.server;
 
 import java.time.Instant;
 

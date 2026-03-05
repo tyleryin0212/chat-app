@@ -1,4 +1,4 @@
-package com.chatflow;
+package com.chatflow.server;
 
 import com.sun.net.httpserver.HttpServer;
 

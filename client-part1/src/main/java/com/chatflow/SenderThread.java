@@ -83,7 +83,7 @@ public class SenderThread implements Runnable {
                 connectLatch.countDown();  // unblock createConnection()
             }
             @Override public void onMessage(String message) {
-
+                System.out.println("Received broadcast: " + message);
             }
             @Override public void onClose(int code, String reason, boolean remote) {
 
@@ -115,15 +115,14 @@ public class SenderThread implements Runnable {
                 return true;
             } catch (Exception e) {
 
-
-                // Exponential backoff: 100ms, 200ms, 400ms, 800ms
                 Thread.sleep((long) Math.pow(2, attempt) * 100);
-
-                // Try to reconnect before next attempt
-
+                try {
                     ws = createConnection(roomId);
                     connections.put(roomId, ws);
                     metrics.recordReconnection();
+                } catch( Exception ex) {
+                    System.out.println("Reconnect failed for room " + roomId);
+                }
 
             }
         }

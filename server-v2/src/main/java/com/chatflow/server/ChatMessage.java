@@ -1,4 +1,4 @@
-package com.chatflow;
+package com.chatflow.server;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 

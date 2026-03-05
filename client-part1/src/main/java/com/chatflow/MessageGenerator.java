@@ -30,13 +30,10 @@ public class MessageGenerator implements Runnable {
             "On it!", "Perfect timing", "Great job!", "Almost there", "Done!"
     };
 
-    //messageType distribution: 90% text, 5% join, 5% leave
-    private static final String[] MESSAGE_TYPES = new String[20];
-    static {
-        for (int i = 0; i < 18; i++) MESSAGE_TYPES[i] = "TEXT";
-        MESSAGE_TYPES[18] = "JOIN";
-        MESSAGE_TYPES[19] = "LEAVE";
-    }
+    //Session structure: 1 JOIN + 18 TEXT + 1 LEAVE = 20 messages
+    // Maintains 90% text, 5% join and 5% leave.
+    private static final int TEXT_PER_SESSION = 18;
+    private static final int MSGS_PER_SESSION = 20;
 
     private final BlockingQueue<String> queue;
     private final int totalMessages;
@@ -52,30 +49,48 @@ public class MessageGenerator implements Runnable {
     @Override
     public void run() {
         int generated = 0;
-        while (generated < totalMessages) {
-            try{
-                String msg = buildMessage();
-                queue.put(msg);
+        int totalSessions = totalMessages / MSGS_PER_SESSION;
+
+        for (int s = 0; s < totalSessions && generated < totalMessages; s++) {
+            try {
+                //assume that each session has the same userId and roomId
+                int userId = random.nextInt(100000) + 1;
+                String roomId = String.valueOf(random.nextInt(20) + 1);
+
+                //JOIN
+                queue.put(buildMessage(userId, roomId, "JOIN"));
                 generated++;
-            }catch (Exception e) {
+
+                // TEXT
+                for (int i = 0; i < TEXT_PER_SESSION && generated < totalMessages; i++) {
+                    queue.put(buildMessage(userId, roomId, "TEXT"));
+                    generated++;
+                }
+
+                // LEAVE
+                queue.put(buildMessage(userId, roomId, "LEAVE"));
+                generated++;
+            } catch (Exception e) {
                 Thread.currentThread().interrupt();
+                System.out.println("MessageGenerator thread interrupted at " + generated + "messages");
                 break;
             }
         }
-        System.out.println("Messages generated: " + generated);
+        System.out.println("Finished. Messages generated: " + generated);
     }
 
-    private String buildMessage() throws Exception{
-        int userId = random.nextInt(100000) + 1;
+    private String buildMessage(int userId, String roomId, String messageType) throws Exception{
 
         ObjectNode msg = mapper.createObjectNode();
+
+        msg.put("messageId", UUID.randomUUID().toString());
         msg.put("userId", String.valueOf(userId));
         msg.put("username",    "user" + userId);
         msg.put("message",     MESSAGE_POOL[random.nextInt(MESSAGE_POOL.length)]);
-        msg.put("roomId",      String.valueOf(random.nextInt(20) + 1));
+        msg.put("roomId",      roomId);
         msg.put("timestamp",   Instant.now().toString());
-        msg.put("messageType", MESSAGE_TYPES[random.nextInt(MESSAGE_TYPES.length)]);
-        msg.put("messageId", UUID.randomUUID().toString());
+        msg.put("messageType", messageType);
+
 
         return mapper.writeValueAsString(msg);
     }

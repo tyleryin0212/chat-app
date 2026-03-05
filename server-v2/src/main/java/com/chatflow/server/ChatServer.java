@@ -1,5 +1,6 @@
-package com.chatflow;
+package com.chatflow.server;
 
+import com.chatflow.consumer.RoomSessionManager;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.java_websocket.WebSocket;
@@ -17,14 +18,20 @@ public class ChatServer extends WebSocketServer {
 
     private static final Logger log = LoggerFactory.getLogger(ChatServer.class);
     private final ObjectMapper mapper = new ObjectMapper();
+
+    //rabbitMQ publisher
     private final RabbitPublisher rabbitPublisher;
+
+    // shared session registry with consumer
+    private final RoomSessionManager sessionManager;
 
     //track active connections
     private final AtomicInteger activeConnections = new AtomicInteger(0);
 
-    public ChatServer(int port, RabbitPublisher rabbitPublisher) {
+    public ChatServer(int port, RabbitPublisher rabbitPublisher,  RoomSessionManager sessionManager) {
         super(new InetSocketAddress(port));
         this.rabbitPublisher = rabbitPublisher;
+        this.sessionManager = sessionManager;
         setReuseAddr(true);
     }
 
@@ -34,6 +41,8 @@ public class ChatServer extends WebSocketServer {
         int count = activeConnections.incrementAndGet();
         String roomId = extractRoomId(handshake.getResourceDescriptor());
         ws.setAttachment(roomId);
+        //register client session in room
+        sessionManager.addSession(roomId, ws);
         log.info("New connection from {} | room={} | totalActive={}",
                 ws.getRemoteSocketAddress(), roomId, count);
     }
@@ -66,6 +75,10 @@ public class ChatServer extends WebSocketServer {
     @Override
     public void onClose(WebSocket ws, int code, String reason, boolean remote) {
         int count = activeConnections.decrementAndGet();
+        String roomId = ws.getAttachment();
+        if (roomId != null) {
+            sessionManager.removeSession(roomId, ws);
+        }
         log.info("Connection closed from {} | code={} | reason={} | totalActive={}",
                 ws.getRemoteSocketAddress(), code, reason, count);
     }
@@ -109,44 +122,5 @@ public class ChatServer extends WebSocketServer {
             return "{\"status\":\"error\",\"reason\":\"internal error\"}";
         }
     }
-
-    // ---- Entry point ----
-
-    public static void main(String[] args) throws Exception {
-        int port = 8080;
-        if (args.length > 0) {
-            port = Integer.parseInt(args[0]);
-        }
-
-        //RabbitMQ connection - replace host with EC2 IP when deploying
-        RabbitPublisher rabbitPublisher = new RabbitPublisher(
-                "localhost",
-                "guest",
-                "guest"
-        );
-
-        ChatServer server = new ChatServer(port, rabbitPublisher);
-        server.start();
-        log.info("Server running. Press Ctrl+C to stop.");
-
-        HealthServer healthServer = new HealthServer(8081);
-        healthServer.start();
-
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            try {
-                log.info("Shutting down server...");
-                server.stop(1000);
-                healthServer.stop();
-                rabbitPublisher.close();
-            } catch (Exception e) {
-                Thread.currentThread().interrupt();
-            }
-        }));
-
-        // Keep the main thread alive
-        Thread.currentThread().join();
-    }
-
-
 
 }

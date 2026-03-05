@@ -1,4 +1,4 @@
-package com.chatflow;
+package com.chatflow.server;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.*;
@@ -21,14 +21,8 @@ public class RabbitPublisher {
     private final ObjectMapper mapper =  new ObjectMapper();
 
 
-    public RabbitPublisher(String host, String username, String password) throws Exception {
-        ConnectionFactory factory = new ConnectionFactory();
-        factory.setHost(host);
-        factory.setUsername(username);
-        factory.setPassword(password);
-        factory.setPort(5672);
-
-        this.connection = factory.newConnection();
+    public RabbitPublisher(Connection connection) throws Exception {
+        this.connection = connection;
         this.channelPool = new ArrayBlockingQueue<>(POOL_SIZE);
 
         initExchangeAndQueues();
