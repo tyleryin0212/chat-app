@@ -1,4 +1,4 @@
-package com.chatflow;
+package com.chatflow.client;
 
 import java.util.concurrent.atomic.AtomicLong;
 

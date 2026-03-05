@@ -26,6 +26,7 @@ public class RoomConsumer implements Runnable {
             DeliverCallback deliverCallback = (consumerTag, delivery) -> {
                 String message = new String(delivery.getBody(), "UTF-8");
                 try {
+
                     sessionManager.broadcast(roomId, message);
                     // acknowledge after successful broadcast
                     channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);

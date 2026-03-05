@@ -1,5 +1,6 @@
-package com.chatflow;
+package com.chatflow.client;
 
+import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -8,14 +9,14 @@ public class LoadTestClient {
 
     // ---- Configuration ----
     private static final String SERVER_BASE_URL  = "ws://localhost:8080/chat/";
-    private static final int    TOTAL_MESSAGES   = 500_000;
+    private static final int    TOTAL_MESSAGES   = 500000;
     private static final int    QUEUE_CAPACITY   = 10_000;
     private static final int    WARMUP_THREADS   = 32;
     private static final int    WARMUP_MESSAGES  = 1_000;   // per thread
     private static final int    MAIN_THREADS     = 100;
 
     public static void main(String[] args) throws InterruptedException {
-        BlockingQueue<String> queue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
+        BlockingQueue<List<String>> queue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
         MetricsCollector metrics = new MetricsCollector();
 
         int warmupTotal = WARMUP_THREADS * WARMUP_MESSAGES;   // 32,000

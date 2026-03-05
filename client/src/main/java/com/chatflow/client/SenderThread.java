@@ -1,4 +1,4 @@
-package com.chatflow;
+package com.chatflow.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -7,6 +7,7 @@ import org.java_websocket.handshake.ServerHandshake;
 
 import java.net.URI;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
@@ -18,7 +19,7 @@ public class SenderThread implements Runnable {
     private static final int MAX_RETRIES = 5;
     private static final ObjectMapper mapper = new ObjectMapper();
 
-    private final BlockingQueue<String> queue;
+    private final BlockingQueue<List<String>> queue;
     private final int messagesToSend; // message number this thread is responsible for
     private final String serverBaseUrl;
     private final MetricsCollector metrics;
@@ -27,7 +28,7 @@ public class SenderThread implements Runnable {
     //connection: roomId -> webSocketClient
     private final Map<String, WebSocketClient> connections = new HashMap<>();
 
-    public SenderThread(BlockingQueue<String> queue, int messagesToSend, String serverBaseUrl,
+    public SenderThread(BlockingQueue<List<String>> queue, int messagesToSend, String serverBaseUrl,
                         MetricsCollector metrics, CountDownLatch latch) {
         this.queue = queue;
         this.messagesToSend = messagesToSend;
@@ -43,18 +44,21 @@ public class SenderThread implements Runnable {
 
         try {
             while (sent < messagesToSend) {
-                String rawMsg = queue.take();
-                String roomId = extractRoomId(rawMsg);
+                List<String> session = queue.take();
+                //get room id from first message
+                String roomId = extractRoomId(session.get(0));
                 WebSocketClient ws = getOrCreateConnection(roomId);
 
-                boolean success = sendWithRetry(ws, rawMsg, roomId);
-                if (success) {
-                    metrics.recordSuccess();
+                for (String message : session) {
+                    boolean success = sendWithRetry(ws, message, roomId);
+                    if (success) {
+                        metrics.recordSuccess();
+                    }
+                    else{
+                        metrics.recordFailure();
+                    }
                 }
-                else {
-                    metrics.recordFailure();
-                }
-                sent++;
+                sent += session.size(); // count all messages in session
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -83,7 +87,7 @@ public class SenderThread implements Runnable {
                 connectLatch.countDown();  // unblock createConnection()
             }
             @Override public void onMessage(String message) {
-                System.out.println("Received broadcast: " + message);
+                //System.out.println("Received broadcast: " + message);
             }
             @Override public void onClose(int code, String reason, boolean remote) {
 

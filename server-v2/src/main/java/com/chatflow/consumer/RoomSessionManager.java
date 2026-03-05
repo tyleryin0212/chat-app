@@ -36,7 +36,6 @@ public class RoomSessionManager {
     public void broadcast(String roomId, String message) {
         Set<WebSocket> sessions = roomSessions.get(roomId);
         if (sessions == null || sessions.isEmpty()) {
-            System.out.println("No clients in room " + roomId);
             return;
         }
         for (WebSocket ws : sessions) {

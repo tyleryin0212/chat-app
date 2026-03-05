@@ -1,9 +1,11 @@
-package com.chatflow;
+package com.chatflow.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
@@ -35,12 +37,13 @@ public class MessageGenerator implements Runnable {
     private static final int TEXT_PER_SESSION = 18;
     private static final int MSGS_PER_SESSION = 20;
 
-    private final BlockingQueue<String> queue;
+    //sending each session together in a List
+    private final BlockingQueue<List<String>> queue;
     private final int totalMessages;
     private final ObjectMapper mapper = new ObjectMapper();
     private final Random random = new Random();
 
-    public MessageGenerator(BlockingQueue<String> queue, int totalMessages) {
+    public MessageGenerator(BlockingQueue<List<String>> queue, int totalMessages) {
         this.queue = queue;
         this.totalMessages = totalMessages;
     }
@@ -57,19 +60,21 @@ public class MessageGenerator implements Runnable {
                 int userId = random.nextInt(100000) + 1;
                 String roomId = String.valueOf(random.nextInt(20) + 1);
 
+                List<String> session = new ArrayList<>();
                 //JOIN
-                queue.put(buildMessage(userId, roomId, "JOIN"));
-                generated++;
+                session.add(buildMessage(userId, roomId, "JOIN"));
+
 
                 // TEXT
-                for (int i = 0; i < TEXT_PER_SESSION && generated < totalMessages; i++) {
-                    queue.put(buildMessage(userId, roomId, "TEXT"));
-                    generated++;
+                for (int i = 0; i < TEXT_PER_SESSION; i++) {
+                    session.add(buildMessage(userId, roomId, "TEXT"));
                 }
 
                 // LEAVE
-                queue.put(buildMessage(userId, roomId, "LEAVE"));
-                generated++;
+                session.add(buildMessage(userId, roomId, "LEAVE"));
+
+                queue.put(session);
+                generated += MSGS_PER_SESSION;
             } catch (Exception e) {
                 Thread.currentThread().interrupt();
                 System.out.println("MessageGenerator thread interrupted at " + generated + "messages");

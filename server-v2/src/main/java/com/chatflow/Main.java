@@ -32,6 +32,9 @@ public class Main {
 
         RoomSessionManager sessionManager = new RoomSessionManager();
 
+        // Create RabbitPublisher
+        RabbitPublisher rabbitPublisher = new RabbitPublisher(rabbitConnection);
+
         // ── Start 20 consumer threads (one per room) ─────────────────────────
         for (int room = 1; room <= TOTAL_ROOMS; room++) {
             String roomId = String.valueOf(room);
@@ -45,7 +48,7 @@ public class Main {
         System.out.println("All " + TOTAL_ROOMS + " room consumers started");
 
         // ── Start WebSocket server ────
-        RabbitPublisher rabbitPublisher = new RabbitPublisher(rabbitConnection);
+
         ChatServer server = new ChatServer(port, rabbitPublisher, sessionManager);
         server.start();
 
