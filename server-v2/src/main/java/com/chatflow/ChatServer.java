@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.java_websocket.WebSocket;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.server.WebSocketServer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 import java.net.InetSocketAddress;
@@ -13,13 +15,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class ChatServer extends WebSocketServer {
 
+    private static final Logger log = LoggerFactory.getLogger(ChatServer.class);
     private final ObjectMapper mapper = new ObjectMapper();
+    private final RabbitPublisher rabbitPublisher;
 
     //track active connections
     private final AtomicInteger activeConnections = new AtomicInteger(0);
 
-    public ChatServer(int port) {
+    public ChatServer(int port, RabbitPublisher rabbitPublisher) {
         super(new InetSocketAddress(port));
+        this.rabbitPublisher = rabbitPublisher;
         setReuseAddr(true);
     }
 
@@ -29,6 +34,8 @@ public class ChatServer extends WebSocketServer {
         int count = activeConnections.incrementAndGet();
         String roomId = extractRoomId(handshake.getResourceDescriptor());
         ws.setAttachment(roomId);
+        log.info("New connection from {} | room={} | totalActive={}",
+                ws.getRemoteSocketAddress(), roomId, count);
     }
 
     @Override
@@ -36,18 +43,19 @@ public class ChatServer extends WebSocketServer {
         try {
             //parse incoming JSON
             ChatMessage msg = mapper.readValue(rawMessage, ChatMessage.class);
-            MessageValidator validator = new MessageValidator();
+
+            //add server metadata
+            msg.setServerId("server-1");
+            msg.setClientIp(ws.getRemoteSocketAddress().getAddress().getHostAddress());
 
             //validate
-            if (validator.validate(msg)) {
-                // build and send success echo response
-                String response = buildSuccessResponse(msg);
-                ws.send(response);
+            if (MessageValidator.validate(msg)) {
+                // send message to RabbitMQ
+                rabbitPublisher.publish(msg);
             }
             else {
                 //send error response
-                String response = buildErrorResponse(validator.getErrorMessage());
-                ws.send(response);
+                ws.send(buildErrorResponse("Message validation failed"));
             }
         } catch (Exception e) {
             //JSON error
@@ -57,17 +65,20 @@ public class ChatServer extends WebSocketServer {
 
     @Override
     public void onClose(WebSocket ws, int code, String reason, boolean remote) {
-        //no ops
+        int count = activeConnections.decrementAndGet();
+        log.info("Connection closed from {} | code={} | reason={} | totalActive={}",
+                ws.getRemoteSocketAddress(), code, reason, count);
     }
 
     @Override
     public void onError(WebSocket ws, Exception e) {
         String addr = (ws != null) ? ws.getRemoteSocketAddress().toString() : "unknown";
+        log.error("Error on connection {}: {}", addr, e.getMessage());
     }
 
     @Override
     public void onStart() {
-        //no ops
+        log.info("ChatFlow WebSocket server started on port {}", getPort());
     }
 
     /**
@@ -75,7 +86,7 @@ public class ChatServer extends WebSocketServer {
      * plus a server-side timestamp.
      */
     private String extractRoomId(String resourceDescriptor) {
-        //"/chat/{room12}"
+
         if (resourceDescriptor != null && resourceDescriptor.startsWith("/chat/")) {
             String roomId = resourceDescriptor.substring("/chat/".length());
             return roomId.isEmpty() ? "unknown" : roomId;
@@ -83,18 +94,6 @@ public class ChatServer extends WebSocketServer {
         return "unknown";
     }
 
-    /**
-     * Builds a JSON error response with the given reason.
-     */
-    private String buildSuccessResponse(ChatMessage msg) throws Exception {
-        ObjectNode response = mapper.createObjectNode();
-        response.put("status", "ok");
-        response.put("serverTimestamp", Instant.now().toString());
-
-        ObjectNode echo = mapper.valueToTree(msg);
-        response.set("echo", echo);
-        return mapper.writeValueAsString(response);
-    }
 
     /**
      * Builds a JSON error response with the given reason.
@@ -119,17 +118,27 @@ public class ChatServer extends WebSocketServer {
             port = Integer.parseInt(args[0]);
         }
 
-        ChatServer server = new ChatServer(port);
+        //RabbitMQ connection - replace host with EC2 IP when deploying
+        RabbitPublisher rabbitPublisher = new RabbitPublisher(
+                "localhost",
+                "guest",
+                "guest"
+        );
+
+        ChatServer server = new ChatServer(port, rabbitPublisher);
         server.start();
+        log.info("Server running. Press Ctrl+C to stop.");
 
         HealthServer healthServer = new HealthServer(8081);
         healthServer.start();
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
+                log.info("Shutting down server...");
                 server.stop(1000);
                 healthServer.stop();
-            } catch (InterruptedException e) {
+                rabbitPublisher.close();
+            } catch (Exception e) {
                 Thread.currentThread().interrupt();
             }
         }));

@@ -6,9 +6,8 @@ import java.util.UUID;
 
 public class MessageValidator {
 
-    public MessageValidator() {}
 
-    public boolean validate(ChatMessage msg) {
+    public static boolean validate(ChatMessage msg) {
         if (msg == null) {
             System.out.println("Message body is null");
             return false;
@@ -27,7 +26,7 @@ public class MessageValidator {
 
 
 
-    private boolean validateMessageId(UUID messageId) {
+    private static boolean validateMessageId(UUID messageId) {
         if (messageId == null) {
             System.out.println("Message id is required.");
             return false;
@@ -35,7 +34,7 @@ public class MessageValidator {
         return true;
     }
 
-    private boolean validateRoomId(String roomId) {
+    private static boolean validateRoomId(String roomId) {
         if  (roomId == null || roomId.isEmpty()) {
             System.out.println("Room Id is required.");
             return false;
@@ -53,7 +52,7 @@ public class MessageValidator {
         return true;
     }
 
-    private boolean validateUserId(String userId) {
+    private static boolean validateUserId(String userId) {
         if (userId == null || userId.isBlank()) {
             System.out.println("userId is required");
             return false;
@@ -72,7 +71,7 @@ public class MessageValidator {
         return true;
     }
 
-    private boolean validateUsername(String username) {
+    private static boolean validateUsername(String username) {
         if (username == null || username.isBlank()) {
             System.out.println("username is required");
             return false;
@@ -84,7 +83,7 @@ public class MessageValidator {
         return true;
     }
 
-    private boolean validateMessage(String message) {
+    private static boolean validateMessage(String message) {
         if (message == null || message.isEmpty()) {
             System.out.println("message is required");
             return false;
@@ -96,7 +95,7 @@ public class MessageValidator {
         return true;
     }
 
-    private boolean validateTimestamp(String timestamp) {
+    private static boolean validateTimestamp(String timestamp) {
         if (timestamp == null || timestamp.isBlank()) {
             System.out.println("timestamp is required");
             return false;
@@ -110,7 +109,7 @@ public class MessageValidator {
         return true;
     }
 
-    private boolean validateMessageType(MessageType messageType) {
+    private static boolean validateMessageType(MessageType messageType) {
         if (messageType == null) {
             System.out.println("messageType is required");
             return false;
@@ -118,7 +117,7 @@ public class MessageValidator {
         return true;
     }
 
-    private boolean validateServerId(String serverId) {
+    private static boolean validateServerId(String serverId) {
         if (serverId == null || serverId.isBlank()) {
             System.out.println("serverId is required");
             return false;
@@ -128,7 +127,7 @@ public class MessageValidator {
         return true;
     }
 
-    private boolean validateClientIp(String clientIp) {
+    private static boolean validateClientIp(String clientIp) {
         if (clientIp == null || clientIp.isBlank()) {
             System.out.println("clientIp is required");
             return false;

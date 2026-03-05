@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.time.Instant;
 import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 
 /**
@@ -74,6 +75,7 @@ public class MessageGenerator implements Runnable {
         msg.put("roomId",      String.valueOf(random.nextInt(20) + 1));
         msg.put("timestamp",   Instant.now().toString());
         msg.put("messageType", MESSAGE_TYPES[random.nextInt(MESSAGE_TYPES.length)]);
+        msg.put("messageId", UUID.randomUUID().toString());
 
         return mapper.writeValueAsString(msg);
     }
