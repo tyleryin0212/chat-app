@@ -8,7 +8,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 public class LoadTestClient {
 
     // ---- Configuration ----
-    private static final String SERVER_BASE_URL  = "ws://35.166.186.195:8080/chat/";
+    private static final String SERVER_BASE_URL  = "ws://chatflow-alb-14549874.us-west-2.elb.amazonaws.com/chat/";
     private static final int    TOTAL_MESSAGES   = 500000;
     private static final int    QUEUE_CAPACITY   = 10_000;
     private static final int    WARMUP_THREADS   = 32;

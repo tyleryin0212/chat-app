@@ -12,19 +12,20 @@ public class Main {
 
     private static final int TOTAL_ROOMS = 20;
 
+
     public static void main(String[] args) throws Exception {
         int port = 8080;
-        if (args.length > 0) {
-            port = Integer.parseInt(args[0]);
-        }
+        String serverId = "server-1";
+        if (args.length > 0) port = Integer.parseInt(args[0]);
+        if (args.length > 1) serverId = args[1];
+        System.out.println("Starting server with serverId: " + serverId);
 
         // ── RabbitMQ connection ───
 
         ConnectionFactory factory = new ConnectionFactory();
-        factory.setHost("beaver-01.rmq.cloudamqp.com");
-        factory.setUsername("qmocmxmm");
-        factory.setPassword("A5PWs4Pl5XewG9dfVezIWBVjGiTQC-JU");
-        factory.setVirtualHost("qmocmxmm");
+        factory.setHost("18.246.236.85");
+        factory.setUsername("chatflow");
+        factory.setPassword("123456");
         factory.setPort(5672);
         Connection rabbitConnection = factory.newConnection();
         System.out.println("Connected to RabbitMQ");
@@ -34,13 +35,13 @@ public class Main {
         RoomSessionManager sessionManager = new RoomSessionManager();
 
         // Create RabbitPublisher
-        RabbitPublisher rabbitPublisher = new RabbitPublisher(rabbitConnection);
+        RabbitPublisher rabbitPublisher = new RabbitPublisher(rabbitConnection, serverId);
 
         // ── Start 20 consumer threads (one per room) ─────────────────────────
         for (int room = 1; room <= TOTAL_ROOMS; room++) {
             String roomId = String.valueOf(room);
             Thread t = new Thread(
-                    new RoomConsumer(roomId, rabbitConnection, sessionManager),
+                    new RoomConsumer(roomId, rabbitConnection, sessionManager, serverId),
                     "consumer-room-" + roomId
             );
             t.setDaemon(true);

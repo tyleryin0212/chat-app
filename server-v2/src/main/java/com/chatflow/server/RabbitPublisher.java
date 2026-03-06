@@ -19,10 +19,12 @@ public class RabbitPublisher {
     private final Connection connection;
     private final BlockingQueue<Channel> channelPool;
     private final ObjectMapper mapper =  new ObjectMapper();
+    private final String serverId;
 
 
-    public RabbitPublisher(Connection connection) throws Exception {
+    public RabbitPublisher(Connection connection, String serverId) throws Exception {
         this.connection = connection;
+        this.serverId = serverId;
         this.channelPool = new ArrayBlockingQueue<>(POOL_SIZE);
 
         initExchangeAndQueues();
@@ -37,7 +39,7 @@ public class RabbitPublisher {
             ch.exchangeDeclare(EXCHANGE_NAME, EXCHANGE_TYPE,  true);
 
             for (int i = 1; i <= TOTAL_ROOMS; i++) {
-                String queueName = "room." + i;
+                String queueName = "room." + i + "." + serverId;
                 String routingKey = "room." + i;
 
                 //declare durable queue for each room
