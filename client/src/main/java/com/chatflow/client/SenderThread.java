@@ -97,6 +97,7 @@ public class SenderThread implements Runnable {
             }
         };
 
+        ws.setConnectionLostTimeout(0);
         ws.connect();
         connectLatch.await();  // wait until onOpen fires before returning
         metrics.recordConnection();

@@ -21,9 +21,10 @@ public class Main {
         // ── RabbitMQ connection ───
 
         ConnectionFactory factory = new ConnectionFactory();
-        factory.setHost("localhost");   // replace with EC2 IP when deploying
-        factory.setUsername("guest");
-        factory.setPassword("guest");
+        factory.setHost("beaver-01.rmq.cloudamqp.com");
+        factory.setUsername("qmocmxmm");
+        factory.setPassword("A5PWs4Pl5XewG9dfVezIWBVjGiTQC-JU");
+        factory.setVirtualHost("qmocmxmm");
         factory.setPort(5672);
         Connection rabbitConnection = factory.newConnection();
         System.out.println("Connected to RabbitMQ");
