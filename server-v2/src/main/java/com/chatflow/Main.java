@@ -12,18 +12,19 @@ public class Main {
 
     private static final int TOTAL_ROOMS = 20;
 
-
     public static void main(String[] args) throws Exception {
         int port = 8080;
+        int consumersPerRoom = 1;
         String serverId = "server-1";
         if (args.length > 0) port = Integer.parseInt(args[0]);
         if (args.length > 1) serverId = args[1];
+        if (args.length > 2) consumersPerRoom = Integer.parseInt(args[2]);
         System.out.println("Starting server with serverId: " + serverId);
 
         // ── RabbitMQ connection ───
 
         ConnectionFactory factory = new ConnectionFactory();
-        factory.setHost("18.246.236.85");
+        factory.setHost("54.185.45.50");
         factory.setUsername("chatflow");
         factory.setPassword("123456");
         factory.setPort(5672);
@@ -40,14 +41,16 @@ public class Main {
         // ── Start 20 consumer threads (one per room) ─────────────────────────
         for (int room = 1; room <= TOTAL_ROOMS; room++) {
             String roomId = String.valueOf(room);
-            Thread t = new Thread(
-                    new RoomConsumer(roomId, rabbitConnection, sessionManager, serverId),
-                    "consumer-room-" + roomId
-            );
-            t.setDaemon(true);
-            t.start();
+            for (int c = 0; c < consumersPerRoom; c++) {
+                Thread t = new Thread(
+                        new RoomConsumer(roomId, rabbitConnection, sessionManager, serverId),
+                        "consumer-room-" + roomId
+                );
+                t.setDaemon(true);
+                t.start();
+            }
         }
-        System.out.println("All " + TOTAL_ROOMS + " room consumers started");
+        System.out.println("All " + TOTAL_ROOMS * consumersPerRoom + " room consumers started");
 
         // ── Start WebSocket server ────
 

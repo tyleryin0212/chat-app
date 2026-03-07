@@ -34,6 +34,6 @@ public class MetricsCollector {
         System.out.printf("Throughput          : %.0f msg/sec%n", throughput);
         System.out.printf("Total connections   : %,d%n", totalConnections.get());
         System.out.printf("Reconnections       : %,d%n", reconnections.get());
-        System.out.println("=======================================");
+
     }
 }
