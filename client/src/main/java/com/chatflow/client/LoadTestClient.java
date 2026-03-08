@@ -15,7 +15,7 @@ public class LoadTestClient {
     // ---- Configuration ----
     private static final String SERVER_BASE_URL  = "ws://chatflow-alb-14549874.us-west-2.elb.amazonaws.com/chat/";
     private static final int    TOTAL_MESSAGES   = 512000;
-    private static final int    QUEUE_CAPACITY   = 10_000;
+    private static final int    QUEUE_CAPACITY   = 1000;
     private static final int    MAIN_THREADS     = 20;
 
 
@@ -51,7 +51,6 @@ public class LoadTestClient {
         mainLatch.await();
         metrics.stopTimer();
         metrics.printSummary();
-        System.out.println("Total client threads: " + mainThreads);
-        System.out.println("=======================================");
+
     }
 }

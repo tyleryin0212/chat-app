@@ -58,7 +58,7 @@ public class SenderThread implements Runnable {
                         metrics.recordFailure();
                     }
                 }
-                sent += session.size(); // count all messages in session
+                sent += session.size();
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

@@ -13,7 +13,7 @@ public class RabbitPublisher {
 
     private static final String EXCHANGE_NAME = "chat.exchange";
     private static final String EXCHANGE_TYPE = "topic";
-    private static final int POOL_SIZE = 10;
+    private static final int POOL_SIZE = 2;
     private static final int TOTAL_ROOMS = 20;
 
     private final Connection connection;

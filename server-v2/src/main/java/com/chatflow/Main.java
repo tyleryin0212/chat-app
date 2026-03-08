@@ -24,7 +24,7 @@ public class Main {
         // ── RabbitMQ connection ───
 
         ConnectionFactory factory = new ConnectionFactory();
-        factory.setHost("54.185.45.50");
+        factory.setHost("34.217.24.107");
         factory.setUsername("chatflow");
         factory.setPassword("123456");
         factory.setPort(5672);
