@@ -18,8 +18,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 
 public class LoadTestClient {
 
-    private static final int QUEUE_CAPACITY = 1000;
-
     public static void main(String[] args) throws Exception {
         // args: totalMessages serverWsUrl metricsUrl mainThreads
         int          totalMessages = args.length > 0 ? Integer.parseInt(args[0]) : 500000;
@@ -32,20 +30,19 @@ public class LoadTestClient {
         System.out.println("  servers=" + serverUrls + " (" + serverUrls.size() + " instance(s))");
         System.out.println("  metrics=" + metricsUrl);
 
-        BlockingQueue<List<String>> queue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
+        BlockingQueue<ChatMessage> queue = new LinkedBlockingQueue<>(10000);
         MetricsCollector metrics = new MetricsCollector();
 
-        Thread generatorThread = new Thread(
-                new MessageGenerator(queue, totalMessages), "msg-generator");
+        Thread generatorThread = new Thread(new MessageGenerator(queue, totalMessages), "msg-generator");
         generatorThread.setDaemon(true);
         generatorThread.start();
 
         metrics.startTimer();
 
-        CountDownLatch sendLatch  = new CountDownLatch(mainThreads); // all threads done sending
-        CountDownLatch closeLatch = new CountDownLatch(mainThreads); // all connections closed
+        CountDownLatch sendLatch  = new CountDownLatch(mainThreads);
+        CountDownLatch closeLatch = new CountDownLatch(mainThreads);
         int msgsPerThread = totalMessages / mainThreads;
-        int remainder = totalMessages % mainThreads;
+        int remainder     = totalMessages % mainThreads;
 
         for (int i = 0; i < mainThreads; i++) {
             int threadMsgs = (i == mainThreads - 1) ? msgsPerThread + remainder : msgsPerThread;

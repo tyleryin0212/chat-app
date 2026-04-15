@@ -1,75 +1,139 @@
 Starting LoadTestClient-v3:
-  totalMessages=500000 threads=20
-  servers=[ws://35.93.131.77:8080/chat/, ws://34.213.43.130:8080/chat/] (2 instance(s))
-  metrics=http://35.93.131.77:8081/metrics
-SLF4J(W): A number (37) of logging calls during the initialization phase have been intercepted and are
+  totalMessages=1000000 threads=10
+  servers=[ws://34.220.211.133:8080/chat/, ws://44.254.130.228:8080/chat/] (2 instance(s))
+  metrics=http://34.220.211.133:8081/metrics
+SLF4J(W): A number (9) of logging calls during the initialization phase have been intercepted and are
 SLF4J(W): now being replayed. These are subject to the filtering rules of the underlying logging system.
 SLF4J(W): See also https://www.slf4j.org/codes.html#replay
-[sender-3] sent 10000 / 25000
-[sender-3] sent 20000 / 25000
-[sender-11] sent 10000 / 25000
-[sender-11] sent 20000 / 25000
-[sender-2] sent 10000 / 25000
-[sender-2] sent 20000 / 25000
-[sender-0] sent 10000 / 25000
-[sender-0] sent 20000 / 25000
-[sender-4] sent 10000 / 25000
-[sender-4] sent 20000 / 25000
-[sender-12] sent 10000 / 25000
-[sender-12] sent 20000 / 25000
-[sender-16] sent 10000 / 25000
-[sender-16] sent 20000 / 25000
-[sender-7] sent 10000 / 25000
-[sender-1] sent 10000 / 25000
-[sender-7] sent 20000 / 25000
-[sender-1] sent 20000 / 25000
-[sender-5] sent 10000 / 25000
-[sender-5] sent 20000 / 25000
-[sender-13] sent 10000 / 25000
-[sender-13] sent 20000 / 25000
-[sender-15] sent 10000 / 25000
-[sender-15] sent 20000 / 25000
-[sender-10] sent 10000 / 25000
-[sender-10] sent 20000 / 25000
-[sender-19] sent 10000 / 25000
-[sender-19] sent 20000 / 25000
-[sender-14] sent 10000 / 25000
-[sender-14] sent 20000 / 25000
-[sender-18] sent 10000 / 25000
-[sender-18] sent 20000 / 25000
-[sender-8] sent 10000 / 25000
-[sender-8] sent 20000 / 25000
-[sender-6] sent 10000 / 25000
-[sender-6] sent 20000 / 25000
-[sender-9] sent 10000 / 25000
-[sender-9] sent 20000 / 25000
-MessageGenerator done. Generated: 500000
-[sender-17] sent 10000 / 25000
-[sender-17] sent 20000 / 25000
-  DB count: 414,209
-  DB count: 500,000
-  DB count: 500,000
-  DB count: 500,000
+[sender-7] sent 10000 / 100000
+[sender-0] sent 10000 / 100000
+[sender-8] sent 10000 / 100000
+[sender-6] sent 10000 / 100000
+[sender-1] sent 10000 / 100000
+[sender-2] sent 10000 / 100000
+[sender-9] sent 10000 / 100000
+[sender-5] sent 10000 / 100000
+[sender-4] sent 10000 / 100000
+[sender-3] sent 10000 / 100000
+[sender-7] sent 20000 / 100000
+[sender-8] sent 20000 / 100000
+[sender-2] sent 20000 / 100000
+[sender-0] sent 20000 / 100000
+[sender-1] sent 20000 / 100000
+[sender-9] sent 20000 / 100000
+[sender-6] sent 20000 / 100000
+[sender-5] sent 20000 / 100000
+[sender-3] sent 20000 / 100000
+[sender-4] sent 20000 / 100000
+[sender-7] sent 30000 / 100000
+[sender-1] sent 30000 / 100000
+[sender-8] sent 30000 / 100000
+[sender-2] sent 30000 / 100000
+[sender-0] sent 30000 / 100000
+[sender-9] sent 30000 / 100000
+[sender-6] sent 30000 / 100000
+[sender-4] sent 30000 / 100000
+[sender-3] sent 30000 / 100000
+[sender-5] sent 30000 / 100000
+[sender-7] sent 40000 / 100000
+[sender-1] sent 40000 / 100000
+[sender-8] sent 40000 / 100000
+[sender-0] sent 40000 / 100000
+[sender-9] sent 40000 / 100000
+[sender-2] sent 40000 / 100000
+[sender-6] sent 40000 / 100000
+[sender-3] sent 40000 / 100000
+[sender-4] sent 40000 / 100000
+[sender-5] sent 40000 / 100000
+[sender-7] sent 50000 / 100000
+[sender-1] sent 50000 / 100000
+[sender-8] sent 50000 / 100000
+[sender-9] sent 50000 / 100000
+[sender-2] sent 50000 / 100000
+[sender-0] sent 50000 / 100000
+[sender-6] sent 50000 / 100000
+[sender-3] sent 50000 / 100000
+[sender-4] sent 50000 / 100000
+[sender-5] sent 50000 / 100000
+[sender-7] sent 60000 / 100000
+[sender-1] sent 60000 / 100000
+[sender-8] sent 60000 / 100000
+[sender-9] sent 60000 / 100000
+[sender-0] sent 60000 / 100000
+[sender-6] sent 60000 / 100000
+[sender-2] sent 60000 / 100000
+[sender-4] sent 60000 / 100000
+[sender-3] sent 60000 / 100000
+[sender-5] sent 60000 / 100000
+[sender-7] sent 70000 / 100000
+[sender-1] sent 70000 / 100000
+[sender-8] sent 70000 / 100000
+[sender-0] sent 70000 / 100000
+[sender-9] sent 70000 / 100000
+[sender-6] sent 70000 / 100000
+[sender-2] sent 70000 / 100000
+[sender-4] sent 70000 / 100000
+[sender-3] sent 70000 / 100000
+[sender-5] sent 70000 / 100000
+[sender-7] sent 80000 / 100000
+[sender-8] sent 80000 / 100000
+[sender-1] sent 80000 / 100000
+[sender-9] sent 80000 / 100000
+[sender-6] sent 80000 / 100000
+[sender-0] sent 80000 / 100000
+[sender-2] sent 80000 / 100000
+[sender-4] sent 80000 / 100000
+[sender-3] sent 80000 / 100000
+[sender-5] sent 80000 / 100000
+[sender-7] sent 90000 / 100000
+[sender-8] sent 90000 / 100000
+[sender-1] sent 90000 / 100000
+[sender-9] sent 90000 / 100000
+[sender-0] sent 90000 / 100000
+[sender-2] sent 90000 / 100000
+[sender-6] sent 90000 / 100000
+[sender-3] sent 90000 / 100000
+[sender-4] sent 90000 / 100000
+[sender-5] sent 90000 / 100000
+[sender-7] sent 100000 / 100000
+[sender-8] sent 100000 / 100000
+[sender-1] sent 100000 / 100000
+MessageGenerator done. Generated: 1000000
+[sender-0] sent 100000 / 100000
+[sender-9] sent 100000 / 100000
+[sender-4] sent 100000 / 100000
+[sender-6] sent 100000 / 100000
+[sender-2] sent 100000 / 100000
+[sender-3] sent 100000 / 100000
+[sender-5] sent 100000 / 100000
+  DB count: 568,526
+  DB count: 742,516
+  DB count: 939,781
+  DB count: 1,141,771
+  DB count: 1,327,271
+  DB count: 1,500,000
+  DB count: 1,500,000
+  DB count: 1,500,000
 
 ========== Load Test Results ==========
-Messages sent         : 500,000
+Messages sent         : 1,000,000
 Failed messages       : 0
-Total runtime         : 17.42 s
+Total runtime         : 3.02 s
 ---------------------------------------
-Round-trip confirmed  : 500,000  (100.0% of sent)
-Round-trip throughput : 17,124 msg/sec
-p50 round-trip        : 2403 ms
-p99 round-trip        : 17177 ms
-Max round-trip        : 22166 ms
+Round-trip confirmed  : 1,000,000  (100.0% of sent)
+Round-trip throughput : 31,546 msg/sec
+p50 round-trip        : 13491 ms
+p99 round-trip        : 28234 ms
+Max round-trip        : 28982 ms
 ---------------------------------------
-Total connections     : 400
+Total connections     : 200
 Reconnections         : 0
 =======================================
 
 ========== DB Write Results ==========
-Messages sent       : 500,000  (28,704 msg/sec)
-Messages in DB      : 500,000
-Gap (sent - in DB)  : 0  (0.0%)
-DB catchup time     : 30.24 s
-DB write throughput : 10492 msg/sec
+Messages sent       : 1,000,000  (331,565 msg/sec)
+Messages in DB      : 1,500,000
+Gap (sent - in DB)  : -500,000  (-50.0%)
+DB catchup time     : 104.58 s
+DB write throughput : 13941 msg/sec
 ======================================

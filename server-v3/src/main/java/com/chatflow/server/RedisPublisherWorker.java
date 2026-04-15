@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit;
 public class RedisPublisherWorker implements Runnable {
 
     private static final int BATCH_SIZE = 200;
-    private static final int POLL_MS    = 5;
+    private static final int POLL_MS    = 1;
 
     private final BlockingQueue<ChatMessage> buffer;
     private final RedisPublisher publisher;

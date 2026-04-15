@@ -1,4 +1,5 @@
 com/chatflow/client/LoadTestClient.class
+com/chatflow/client/ChatMessage.class
 com/chatflow/client/SenderThread$1.class
 com/chatflow/client/MessageGenerator.class
 com/chatflow/client/MetricsCollector.class

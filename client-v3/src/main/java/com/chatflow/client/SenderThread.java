@@ -5,11 +5,13 @@ import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
 
 import java.net.URI;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -18,10 +20,10 @@ import java.util.concurrent.TimeUnit;
 public class SenderThread implements Runnable {
 
     private static final int MAX_RETRIES = 5;
-    private static final int DRAIN_MS = 30000;
+    private static final int DRAIN_MS    = 30000;
     private static final ObjectMapper mapper = new ObjectMapper();
 
-    private final BlockingQueue<List<String>> queue;
+    private final BlockingQueue<ChatMessage> queue;
     private final int messagesToSend;
     private final List<String> serverUrls;
     private final MetricsCollector metrics;
@@ -30,19 +32,18 @@ public class SenderThread implements Runnable {
     private final Map<String, WebSocketClient> connections = new HashMap<>();
     private final Random random = new Random();
 
-    // messageId → send timestamp; used to measure round-trip latency.
-    // ConcurrentHashMap because onMessage fires on a WebSocket selector thread,
-    // not the sender thread.
+    // messageId → send timestamp for round-trip latency measurement.
+    // ConcurrentHashMap because onMessage fires on a WebSocket selector thread.
     private final ConcurrentHashMap<String, Long> sentAt = new ConcurrentHashMap<>();
 
-    public SenderThread(BlockingQueue<List<String>> queue, int messagesToSend, List<String> serverUrls,
+    public SenderThread(BlockingQueue<ChatMessage> queue, int messagesToSend, List<String> serverUrls,
                         MetricsCollector metrics, CountDownLatch sendLatch, CountDownLatch closeLatch) {
-        this.queue = queue;
+        this.queue         = queue;
         this.messagesToSend = messagesToSend;
-        this.serverUrls = Collections.unmodifiableList(serverUrls);
-        this.metrics = metrics;
-        this.sendLatch = sendLatch;
-        this.closeLatch = closeLatch;
+        this.serverUrls    = Collections.unmodifiableList(serverUrls);
+        this.metrics       = metrics;
+        this.sendLatch     = sendLatch;
+        this.closeLatch    = closeLatch;
     }
 
     private String randomUrl() {
@@ -55,21 +56,22 @@ public class SenderThread implements Runnable {
         String threadName = Thread.currentThread().getName();
         try {
             while (sent < messagesToSend) {
-                List<String> session = queue.take();
-                String roomId = extractRoomId(session.get(0));
-                WebSocketClient ws = null;
+                ChatMessage chatMsg = queue.take();
+                String roomId = chatMsg.getRoomId();
+
+                WebSocketClient ws;
                 try {
                     ws = getOrCreateConnection(roomId, randomUrl());
                 } catch (Exception e) {
                     metrics.recordFailure();
-                    sent += session.size();
+                    sent++;
                     continue;
                 }
-                for (String message : session) {
-                    if (sendWithRetry(ws, message, roomId)) metrics.recordSuccess();
-                    else metrics.recordFailure();
-                }
-                sent += session.size();
+
+                if (sendWithRetry(ws, chatMsg, roomId)) metrics.recordSuccess();
+                else metrics.recordFailure();
+
+                sent++;
                 if (sent % 10000 == 0) {
                     System.out.printf("[%s] sent %d / %d%n", threadName, sent, messagesToSend);
                 }
@@ -121,16 +123,17 @@ public class SenderThread implements Runnable {
         return ws;
     }
 
-    private boolean sendWithRetry(WebSocketClient ws, String msg, String roomId) throws InterruptedException {
+    private boolean sendWithRetry(WebSocketClient ws, ChatMessage chatMsg, String roomId) throws InterruptedException {
+        // Assign messageId and fresh timestamp at send time
+        String msgId = UUID.randomUUID().toString();
+        chatMsg.setMessageId(msgId);
+        chatMsg.setTimestamp(Instant.now().toString());
+
         for (int attempt = 0; attempt < MAX_RETRIES; attempt++) {
             try {
-                // Record send time just before sending so the clock starts
-                // as close to the actual network write as possible.
-                String msgId = extractMessageId(msg);
-                if (!msgId.isEmpty()) {
-                    sentAt.put(msgId, System.currentTimeMillis());
-                }
-                ws.send(msg);
+                String json = mapper.writeValueAsString(chatMsg);
+                sentAt.put(msgId, System.currentTimeMillis());
+                ws.send(json);
                 return true;
             } catch (Exception e) {
                 Thread.sleep((long) Math.pow(2, attempt) * 100);
@@ -152,12 +155,6 @@ public class SenderThread implements Runnable {
                 try { ws.closeBlocking(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
             }
         });
-    }
-
-    private String extractRoomId(String rawMsg) {
-        try {
-            return mapper.readTree(rawMsg).get("roomId").asText();
-        } catch (Exception e) { return "1"; }
     }
 
     private String extractMessageId(String rawMsg) {

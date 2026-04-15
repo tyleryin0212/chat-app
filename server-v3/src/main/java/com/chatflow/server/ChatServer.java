@@ -24,7 +24,7 @@ public class ChatServer extends WebSocketServer {
     private final String serverId;
 
     public ChatServer(int port, BlockingQueue<ChatMessage> publishBuffer, RoomSessionManager sessionManager, String serverId) {
-        super(new InetSocketAddress(port));
+        super(new InetSocketAddress(port), 8);
         this.publishBuffer = publishBuffer;
         this.sessionManager = sessionManager;
         this.serverId = serverId;

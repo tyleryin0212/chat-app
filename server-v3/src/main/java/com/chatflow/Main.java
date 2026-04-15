@@ -37,7 +37,7 @@ public class Main {
         MetricsService metricsService = new MetricsService(dbHost);
 
         // ── Publish buffer + worker threads ───────────────────────────────────
-        BlockingQueue<ChatMessage> publishBuffer = new LinkedBlockingQueue<>(500_000);
+        BlockingQueue<ChatMessage> publishBuffer = new LinkedBlockingQueue<>(1000_000);
         int numPublisherWorkers = 4;
         for (int i = 0; i < numPublisherWorkers; i++) {
             Thread t = new Thread(new RedisPublisherWorker(publishBuffer, redisPublisher, "redis-publisher-" + i), "redis-publisher-" + i);
