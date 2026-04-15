@@ -1,125 +1,104 @@
-# CS6650 Assignment 3 & 4 — Project Context
+# CS6650 Assignment 4 — Project Context
 
 ## What this project is
 
 A distributed chat system built for Northeastern CS6650 (Building Scalable Distributed Systems).
 - **Assignment 3**: Added persistence (high-throughput DB writes) on top of a WebSocket chat server + RabbitMQ consumer pipeline.
-- **Assignment 4 (current)**: Group optimization assignment — implement 2 material performance improvements and measure with JMeter.
+- **Assignment 4 (implemented)**: Two material performance optimizations — (1) replaced RabbitMQ with Redis Pub/Sub + Streams, (2) PostgreSQL time-partitioned table.
 
 ---
 
-## Current architecture (Assignment 3 baseline)
+## Current architecture (Assignment 4 — fully implemented)
 
 ```
 client-v3/        → Load test client (Java, sends WebSocket messages)
-server-v3/        → WebSocket chat server + Metrics API (HTTP)
-consumer-v3/      → RabbitMQ consumer → batched DB writes
-database/         → PostgreSQL schema
-load-tests/       → Test results and reports
+server-v3/        → WebSocket chat server + HTTP Metrics/Stats API
+consumer-v3/      → Redis Stream consumer → batched PostgreSQL writes
+database/         → PostgreSQL schema (time-partitioned)
 ```
 
-### Message flow (current)
+### Message flow
 ```
-LoadTestClient → WebSocket (8080) → ChatServer → RabbitMQ → RoomConsumer → writeBuffer → BatchWriter → PostgreSQL
-                                                                  ↓
-                                                        BroadcastClient (HTTP POST → AdminServer 8081 → sessionManager → WebSocket clients)
+LoadTestClient
+  → WebSocket (port 8080)
+  → ChatServer.onMessage()
+  → publishBuffer (LinkedBlockingQueue, 500k cap)
+  → RedisPublisherWorker (4 threads, batch=200)
+  → RedisPublisher.publishBatch()
+       ├─ PUBLISH room:{roomId}            → RedisSubscriber (on ALL servers)
+       │                                      → sessionManager.broadcast()
+       │                                      → local WebSocket clients
+       └─ XADD room-stream:{roomId}        → RedisStreamConsumer (1 thread/room)
+                                              → writeBuffer (BlockingQueue, 100k cap)
+                                              → BatchWriter (5 threads)
+                                              → PostgreSQL (time-partitioned)
 ```
 
-### Key classes
+### Pipeline checkpoints (logged at runtime)
+```
+checkpoint-1: ChatServer      — received, enqueued, failedValidation, bufferFull
+checkpoint-2: PublisherWorker — totalPublished, totalFailed (per worker)
+checkpoint-3: StreamConsumer  — processed, duplicates, errors (per room, every 10s)
+              BatchWriter     — totalWritten, totalBatches, dbErrors
+```
+The load test client fetches all four checkpoints at end of test and prints a full pipeline summary.
+
+---
+
+## Key classes
 
 **server-v3:**
-- `ChatServer` — WebSocket listener, validates + publishes to RabbitMQ
-- `RabbitPublisher` — channel pool + circuit breaker, publishes to RabbitMQ topic exchange
-- `MessageValidator` — validates all fields (UUID, room 1-20, user 1-100000, etc.)
-- `AdminServer` — HTTP on 8081: `/health`, `/broadcast/{roomId}`, `/metrics`
-- `MetricsService` — JDBC queries to PostgreSQL for analytics JSON (called after load test)
-- `RoomSessionManager` — thread-safe `room → Set<WebSocket>` for local fan-out
+- `ChatServer` — WebSocket server (64 threads). Validates message, enqueues to `publishBuffer`. Never calls Redis directly.
+- `RedisPublisher` — `publishBatch()` uses a Jedis pipeline: one `PUBLISH room:{roomId}` + one `XADD room-stream:{roomId}` per message. JedisPool (max 100). Circuit breaker: 5 failures → open, 10s cooldown.
+- `RedisPublisherWorker` — drains `publishBuffer` and calls `RedisPublisher.publishBatch()`. 4 workers share the buffer, each draining up to 200 messages per pass (poll timeout 5ms). Decouples WebSocket I/O from Redis I/O.
+- `RedisSubscriber` — subscribes to channels `room:1`–`room:20` on startup. On message received → `sessionManager.broadcast()`. Dedicated blocking connection (Pub/Sub blocks); reconnects on disconnect (2s delay). Runs on its own daemon thread.
+- `RoomSessionManager` — thread-safe `ConcurrentHashMap<roomId, Set<WebSocket>>` for local fan-out. Note: lives in `com.chatflow.consumer` package but is part of server-v3.
+- `MessageValidator` — validates all fields (UUID, roomId 1-20, userId 1-100000, username alphanumeric 3-20, message non-empty ≤500 chars, messageType TEXT/JOIN/LEAVE, timestamp ISO-8601).
+- `AdminServer` — HTTP on `port+1` (e.g., 8081). Endpoints: `GET /health`, `GET /metrics`, `GET /pipeline-stats`.
+- `MetricsService` — JDBC queries to PostgreSQL for analytics JSON.
 
 **consumer-v3:**
-- `RoomConsumer` — 1 thread per room, dedup (LRU-1000), acks after enqueue
-- `BatchWriter` — 5 threads, drains writeBuffer, batches to PostgreSQL, has circuit breaker
-- `DeadLetterQueue` — in-memory retry queue for failed DB batches (retries every 30s)
-- `BroadcastClient` — async HTTP POST to server `/broadcast/{roomId}` for fan-out
-- `DatabaseConnectionPool` — HikariCP wrapper (max 5 connections)
-- `StatsAggregator` — logs throughput/buffer stats every 10s
+- `RedisStreamConsumer` — 1 thread per room, reads from `room-stream:{roomId}` using `XREADGROUP GROUP db-writers <consumerName> COUNT 100 BLOCK 1000`. Dedup LRU-1000. `XACK` only after successful `writeBuffer.offer()` — unacked entries stay pending for durability. On restart, prior pending entries are reclaimed automatically (group reads from last ack position).
+- `BatchWriter` — 5 threads drain `writeBuffer`, batch-insert to PostgreSQL. Circuit breaker: 3 failures → open, exponential backoff (30s → 5min cap). `ON CONFLICT (message_id) DO NOTHING`.
+- `DatabaseConnectionPool` — HikariCP (max 5, one per writer thread). Connection timeout 30s, idle timeout 10min, max lifetime 30min.
+- `StatsAggregator` — logs throughput, batch count, error rate, buffer depth every 10s.
+- `Main` — also starts a consumer stats HTTP server on port 9090: `GET /stats` returns `msgsConsumedFromStream`, `duplicatesSkipped`, `consumeErrors`, `msgsWrittenToDB`, `dbBatches`, `dbWriteErrors`, `writeBufferDepth`.
 
 **client-v3:**
-- `LoadTestClient` — orchestrates test, polls `/metrics` until DB count stabilizes
-- `MessageGenerator` — produces batches: 1 JOIN + 18 TEXT + 1 LEAVE per user session
-- `SenderThread` — N threads, WebSocket connection pool per room, retry w/ exponential backoff
-- `MetricsCollector` — atomic counters → throughput summary
+- `LoadTestClient` — orchestrates test. Args: `totalMessages serverWsUrl metricsUrl threads pipelineStatsUrl consumerStatsUrl`. After senders complete, polls `/metrics` until DB count stabilizes (2 consecutive equal readings 5s apart), then fetches `/pipeline-stats` (server, port+1) and `/stats` (consumer, 9090) and prints full pipeline summary.
+- `MessageGenerator` — produces batches: 1 JOIN + 18 TEXT + 1 LEAVE per user session. Random userId (1–100000), roomId (1–20).
+- `SenderThread` — sends batches via WebSocket. Per-room connection pool (one connection per room per thread). Retry with exponential backoff (up to 5 attempts, 100ms × 2^attempt).
+- `MetricsCollector` — atomic counters for success/fail/received/connections/reconnections + throughput summary.
 
-### Database schema (current)
-Single table `messages`, PK is `message_id` (VARCHAR UUID). Three composite B-tree indexes:
+### Database schema
+`messages` table partitioned `BY RANGE (timestamp)`. PK is `(message_id, timestamp)` (partition key must be in PK). Quarterly partitions: 2026-Q1 through 2026-Q4, 2027-Q1. Indexes on parent propagate automatically to each partition:
 - `(room_id, timestamp)` — room range queries
 - `(user_id, timestamp)` — user history
-- `(timestamp)` — active user counts
+- `(timestamp)` — active user count window
 
 ---
 
-## Assignment 4 planned changes (NOT YET IMPLEMENTED)
+## CLI args reference
 
-These are the two material optimizations decided on. Implementation starts in a new folder copied from this one.
-
-### Optimization 1: Replace RabbitMQ with Redis (Pub/Sub + Streams)
-
-**Problem being solved:** Single server bottleneck. Currently `BroadcastClient` HTTP-posts to one hardcoded server URL — with multiple servers, clients on other servers never receive broadcasts. Also consolidates infrastructure from RabbitMQ + future Redis → Redis only.
-
-**New message flow:**
+### server-v3
 ```
-ChatServer.onMessage()
-  → RedisPublisher.publish()
-       ├─ PUBLISH room:{roomId}     → RedisSubscriber (on ALL servers) → sessionManager.broadcast() → local WebSocket clients
-       └─ XADD room-stream          → RedisStreamConsumer (consumer group "db-writers") → writeBuffer → BatchWriter → PostgreSQL
+java -jar server-v3/target/server-v3-1.0-SNAPSHOT.jar [port] [serverId] [redisHost] [dbHost]
 ```
+Defaults: `8080`, `server-1`, `localhost`, `54.188.60.194`
+Admin/metrics port is always `port+1` (e.g., 8081 when port=8080).
 
-**New classes to create:**
+### consumer-v3
+```
+java -jar consumer-v3/target/consumer-v3-1.0-SNAPSHOT.jar [redisHost] [dbHost] [batchSize] [flushIntervalMs]
+```
+Defaults: `localhost`, `54.188.60.194`, `500`, `500`
+Consumer stats always on port 9090.
 
-`server-v3`:
-- `RedisPublisher` — called from `ChatServer.onMessage()`. Does both: `PUBLISH room:{roomId}` (Pub/Sub fan-out) + `XADD room-stream` (Stream for DB persistence). Replaces `RabbitPublisher`.
-- `RedisSubscriber` — subscribes to `room:1` through `room:20` on startup. On message received → `sessionManager.broadcast()`. Runs on its own thread (Pub/Sub blocks connection). Replaces the HTTP `/broadcast` callback pattern.
-
-`consumer-v3`:
-- `RedisStreamConsumer` — replaces `RoomConsumer`. Uses `XREADGROUP` with consumer group `"db-writers"` to read from Redis Stream. Feeds messages into `writeBuffer`. Does NOT `XACK` until message is safely in writeBuffer. On DB failure, message stays pending in stream — stream replaces DeadLetterQueue.
-
-**Classes to delete:**
-- `RabbitPublisher` (server-v3)
-- `RoomConsumer` (consumer-v3)
-- `BroadcastClient` (consumer-v3) — Redis Pub/Sub handles fan-out now, consumer no longer broadcasts
-- `DeadLetterQueue` (consumer-v3) — Redis Stream pending entries replace it
-
-**Changes to existing classes:**
-- `ChatServer.onMessage()` — call `RedisPublisher` instead of `RabbitPublisher`
-- `AdminServer` — remove `/broadcast` endpoint (no longer needed)
-- `server-v3/Main` — initialize `RedisPublisher` + `RedisSubscriber`, remove RabbitMQ setup
-- `consumer-v3/Main` — start `RedisStreamConsumer` threads, remove RabbitMQ + `BroadcastClient` + `DeadLetterQueue`
-- Both `pom.xml` files — add Jedis dependency, remove RabbitMQ dependency
-
-**Redis persistence:** Enable AOF in `redis.conf` with `appendonly yes` — one line, ensures messages survive Redis restart.
-
-**Why not Kafka:** Also persistent and partitioned, but adds a third infrastructure component (already adding Redis). No measurable DB write throughput improvement since PostgreSQL is the bottleneck, not the queue. Redis Streams at same infrastructure cost handles 500k-1M messages comfortably.
-
-**Why not keep RabbitMQ:** Works fine but requires running two separate messaging systems (RabbitMQ + Redis). Consolidating to Redis alone is cleaner and a defensible optimization.
-
----
-
-### Optimization 2: PostgreSQL time partitioning
-
-**Problem being solved:** Write throughput visibly degrades as table grows. Root cause: 3 B-tree indexes all grow deeper with each insert — every INSERT updates all 3 indexes, each taking longer as the tree deepens.
-
-**Fix:** Partition the `messages` table by `timestamp` range. Each partition has its own small indexes. New inserts always go to the latest (small) partition. Old partitions are never touched by new inserts. All existing queries in `MetricsService` work unchanged — PostgreSQL routes automatically.
-
-**Schema changes required:**
-- PK changes from `(message_id)` to `(message_id, timestamp)` — PostgreSQL requires partition key in PK
-- Add `PARTITION BY RANGE (timestamp)` to table definition
-- Create partitions for current time ranges (2026 Q2, Q3 at minimum)
-- Indexes defined on parent table, automatically propagated to each partition
-
-**No application code changes needed** — `BatchWriter` SQL stays identical, `MetricsService` queries unchanged.
-
-**Why not Cassandra:** Cassandra uses "query-driven modeling" — one table per query pattern. Every INSERT would need to write to 4-5 denormalized tables. Analytics queries (top users, top rooms, COUNT DISTINCT) are not natively supported and require application-level aggregation or pre-maintained counter tables. Too much rewrite for this assignment.
-
-**Why not TimescaleDB:** Also a strong option (PostgreSQL extension, automatic hypertable partitioning). Manual partitioning chosen for simplicity and transparency — same result, no extension dependency.
+### client-v3
+```
+java -jar client-v3/target/client-v3-1.0-SNAPSHOT.jar [totalMessages] [serverWsUrl] [metricsUrl] [threads] [pipelineStatsUrl] [consumerStatsUrl]
+```
+Defaults: `500000`, `ws://localhost:8080/chat/`, `http://localhost:8081/metrics`, `20`, `http://localhost:8081/pipeline-stats`, `http://localhost:9090/stats`
 
 ---
 
@@ -127,14 +106,15 @@ ChatServer.onMessage()
 
 | # | Task | Status |
 |---|---|---|
-| 1 | Add Jedis dependency, remove RabbitMQ from both pom.xml files | pending |
-| 2 | Create `RedisPublisher` in server-v3 | pending |
-| 3 | Create `RedisSubscriber` in server-v3 | pending |
-| 4 | Update `ChatServer`, `AdminServer`, `Main` in server-v3 + delete `RabbitPublisher` | pending |
-| 5 | Create `RedisStreamConsumer` in consumer-v3 | pending |
-| 6 | Update `Main` in consumer-v3 + delete `RoomConsumer`, `BroadcastClient`, `DeadLetterQueue` | pending |
-| 7 | Update `schema.sql` for time partitioning + enable Redis AOF | pending |
-| 8 | EC2 deployment setup — SSH config + env file (once EC2 instance count is decided) | pending |
+| 1 | Add Jedis dependency, remove RabbitMQ from both pom.xml files | ✅ done |
+| 2 | Create `RedisPublisher` in server-v3 | ✅ done |
+| 3 | Create `RedisSubscriber` in server-v3 | ✅ done |
+| 4 | Update `ChatServer`, `AdminServer`, `Main` in server-v3 + delete `RabbitPublisher` | ✅ done |
+| 5 | Create `RedisStreamConsumer` in consumer-v3 | ✅ done |
+| 6 | Update `Main` in consumer-v3 + delete `RoomConsumer`, `BroadcastClient`, `DeadLetterQueue` | ✅ done |
+| 7 | Update `schema.sql` for time partitioning (Q1–Q4 2026, Q1 2027) | ✅ done |
+| 7b | Enable Redis AOF (`appendonly yes` in redis.conf) | pending — runtime config |
+| 8 | EC2 deployment setup — SSH config + env file | pending |
 
 ### Task 8 notes — EC2 deployment setup
 EC2 IPs change every AWS Academy Lab session. Once the number of instances is decided, set up:
@@ -142,10 +122,10 @@ EC2 IPs change every AWS Academy Lab session. Once the number of instances is de
 - `ec2-hosts.sh` in project root with `export SERVER1_IP=...` etc. — `source ec2-hosts.sh` at session start
 - All SSH/SCP deployment commands use aliases + env vars so nothing else changes when IPs rotate
 
-Likely instances needed (decide count first):
+Likely instances needed:
 - 1 or 2 EC2s for server-v3 (multiple instances on same EC2 on different ports is fine, fronted by AWS ALB)
 - 1 EC2 for Redis + consumer-v3 (co-locate, they communicate constantly)
-- 1 EC2 for PostgreSQL (already running at 54.188.60.194 — confirm if this persists across lab sessions)
+- 1 EC2 for PostgreSQL (default in code: `54.188.60.194` — confirm if this persists across lab sessions)
 - AWS ALB in front of server EC2(s) with target groups pointing to each server port
 
 ---
@@ -168,7 +148,12 @@ Likely instances needed (decide count first):
 ## Key design decisions (for reference / report)
 
 - **Denormalized single table** — intentional. FK validation at 1M inserts/test would add 2M extra lookups + lock contention. username never changes so duplication is acceptable for an append-only event log.
-- **Write-behind pattern** — `writeBuffer` (BlockingQueue, 100k cap) decouples RabbitMQ/Redis consumption rate from DB write rate. Server never waits on DB.
-- **Circuit breaker in BatchWriter** — 3 failures → open, exponential backoff (30s → 5min cap). With Redis Streams, failed messages stay pending instead of going to in-memory DLQ.
-- **Idempotent writes** — `ON CONFLICT (message_id) DO NOTHING` + client-side LRU dedup (1000 entries).
+- **publishBuffer between ChatServer and RedisPublisher** — `ChatServer.onMessage()` enqueues (O(1), never blocks on Redis). `RedisPublisherWorker` threads drain and batch-publish with Redis pipelines. Decouples WebSocket I/O from Redis I/O.
+- **Write-behind pattern** — `writeBuffer` (BlockingQueue, 100k cap) decouples Redis Stream consumption from DB write rate. Consumer never waits on DB.
+- **Redis Streams as DLQ replacement** — unacked entries stay pending in stream. On consumer restart, `XREADGROUP` automatically resumes from last ack position, reclaiming all pending messages. No separate in-memory DLQ needed.
+- **Circuit breaker in RedisPublisher** — 5 failures → open, 10s cooldown. Circuit breaker in BatchWriter — 3 failures → open, exponential backoff (30s → 5min cap).
+- **Idempotent writes** — `ON CONFLICT (message_id) DO NOTHING` + consumer-side LRU dedup (1000 entries per room).
+- **Time partitioning** — each quarterly partition maintains its own small B-tree indexes. New inserts always land in the current (small) partition, keeping index depth constant regardless of total table size.
+- **Why Redis over Kafka** — Kafka would be a third infrastructure component. Redis Streams handle 500k-1M messages comfortably at the same infrastructure cost as Redis Pub/Sub already needed.
+- **Why manual partitioning over TimescaleDB** — same result, no extension dependency.
 - **Batch tuning** — default batchSize=500, flushIntervalMs=500. Configurable via CLI args.

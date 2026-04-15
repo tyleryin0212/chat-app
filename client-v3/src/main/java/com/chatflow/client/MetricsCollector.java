@@ -26,7 +26,8 @@ public class MetricsCollector {
         receivedCount.incrementAndGet();
     }
 
-    public long getReceivedCount() { return receivedCount.get(); }
+    public long getReceivedCount()  { return receivedCount.get(); }
+    public long getSuccessCount()   { return successCount.get(); }
 
     public void startTimer()      { startTime = System.currentTimeMillis(); }
     public void stopTimer()       { endTime   = System.currentTimeMillis(); }

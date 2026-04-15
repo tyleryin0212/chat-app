@@ -1,11 +1,11 @@
 #!/bin/bash
-# Deploy and run client-v3 on EC2 #4.
+# Build and run client-v3 locally against the EC2 server.
 # Usage: ./deploy-client.sh [totalMessages] [threads]
 # Prereq: source ec2-hosts.sh
 
 set -e
 
-if [ -z "$CLIENT_IP" ] || [ -z "$SERVER_IP" ]; then
+if [ -z "$SERVER_IP" ] || [ -z "$CONSUMER_IP" ]; then
     echo "ERROR: run 'source ec2-hosts.sh' first"
     exit 1
 fi
@@ -18,11 +18,20 @@ cd client-v3 && mvn package -q -DskipTests && cd ..
 
 JAR=client-v3/target/client-v3-1.0-SNAPSHOT.jar
 
-echo "=== Deploying JAR to $CLIENT_IP ==="
-scp -i $SSH_KEY $JAR $SSH_USER@$CLIENT_IP:~/client-v3.jar
+echo "=== Running load test locally ==="
+echo "  messages=$TOTAL_MESSAGES  threads=$THREADS"
+echo "  server=ws://$SERVER_IP:8080/chat/"
+echo "  metrics=http://$SERVER_IP:8081/metrics"
+echo "  pipeline-stats=http://$SERVER_IP:8081/pipeline-stats"
+echo "  consumer-stats=http://$CONSUMER_IP:9090/stats"
 
-echo "=== Running load test: $TOTAL_MESSAGES messages, $THREADS threads ==="
-ssh -i $SSH_KEY $SSH_USER@$CLIENT_IP \
-    "java -jar client-v3.jar $TOTAL_MESSAGES ws://$SERVER_IP:8080/chat/ http://$SERVER_IP:8081/metrics $THREADS 2>&1 | tee client.log"
+java -jar $JAR \
+    $TOTAL_MESSAGES \
+    ws://$SERVER_IP:8080/chat/ \
+    http://$SERVER_IP:8081/metrics \
+    $THREADS \
+    http://$SERVER_IP:8081/pipeline-stats \
+    http://$CONSUMER_IP:9090/stats \
+    2>&1 | tee client.log
 
-echo "=== Done ==="
+echo "=== Done — full output saved to client.log ==="

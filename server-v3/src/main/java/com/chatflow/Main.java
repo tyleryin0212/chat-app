@@ -9,6 +9,7 @@ import com.chatflow.server.RedisPublisher;
 import com.chatflow.server.RedisPublisherWorker;
 import com.chatflow.server.RedisSubscriber;
 
+import java.util.Arrays;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
@@ -39,10 +40,10 @@ public class Main {
         // ── Publish buffer + worker threads ───────────────────────────────────
         BlockingQueue<ChatMessage> publishBuffer = new LinkedBlockingQueue<>(500_000);
         int numPublisherWorkers = 4;
+        RedisPublisherWorker[] workers = new RedisPublisherWorker[numPublisherWorkers];
         for (int i = 0; i < numPublisherWorkers; i++) {
-            Thread t = new Thread(
-                    new RedisPublisherWorker(publishBuffer, redisPublisher, "redis-publisher-" + i),
-                    "redis-publisher-" + i);
+            workers[i] = new RedisPublisherWorker(publishBuffer, redisPublisher, "redis-publisher-" + i);
+            Thread t = new Thread(workers[i], "redis-publisher-" + i);
             t.setDaemon(true);
             t.start();
         }
@@ -54,7 +55,15 @@ public class Main {
 
         // ── Health + metrics endpoint ─────────────────────────────────────────
         int adminPort = port + 1;
-        AdminServer adminServer = new AdminServer(adminPort, metricsService);
+        AdminServer adminServer = new AdminServer(adminPort, metricsService, () -> {
+            long published    = Arrays.stream(workers).mapToLong(RedisPublisherWorker::getTotalPublished).sum();
+            long publishFailed = Arrays.stream(workers).mapToLong(RedisPublisherWorker::getTotalFailed).sum();
+            return String.format(
+                "{\"msgsReceived\":%d,\"msgsEnqueued\":%d,\"msgsFailedValidation\":%d,\"msgsBufferFull\":%d,\"msgsPublishedToRedis\":%d,\"msgsPublishFailed\":%d}",
+                server.getMsgsReceived(), server.getMsgsEnqueued(),
+                server.getMsgsFailedValidation(), server.getMsgsBufferFull(),
+                published, publishFailed);
+        });
         adminServer.start();
 
         System.out.println("ChatFlow server-v3 started on port " + port);

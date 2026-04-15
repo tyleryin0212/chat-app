@@ -1,0 +1,45 @@
+Starting LoadTestClient-v3:
+  totalMessages=500000 threads=20
+  server=ws://52.42.16.211:8080/chat/
+  metrics=http://52.42.16.211:8081/metrics
+  pipelineStats=http://52.42.16.211:8081/pipeline-stats
+  consumerStats=http://44.255.202.124:9090/stats
+SLF4J(W): A number (35) of logging calls during the initialization phase have been intercepted and are
+SLF4J(W): now being replayed. These are subject to the filtering rules of the underlying logging system.
+SLF4J(W): See also https://www.slf4j.org/codes.html#replay
+[sender-10] sent 10000 / 25000
+[sender-18] sent 10000 / 25000
+[sender-10] sent 20000 / 25000
+[sender-18] sent 20000 / 25000
+[sender-8] sent 10000 / 25000
+[sender-8] sent 20000 / 25000
+[sender-19] sent 10000 / 25000
+[sender-19] sent 20000 / 25000
+[sender-4] sent 10000 / 25000
+[sender-4] sent 20000 / 25000
+[sender-2] sent 10000 / 25000
+[sender-2] sent 20000 / 25000
+[sender-11] sent 10000 / 25000
+[sender-11] sent 20000 / 25000
+[sender-13] sent 10000 / 25000
+[sender-13] sent 20000 / 25000
+[sender-0] sent 10000 / 25000
+[sender-0] sent 20000 / 25000
+[sender-9] sent 10000 / 25000
+[sender-9] sent 20000 / 25000
+[sender-7] sent 10000 / 25000
+[sender-7] sent 20000 / 25000
+[sender-16] sent 10000 / 25000
+[sender-16] sent 20000 / 25000
+[sender-12] sent 10000 / 25000
+[sender-12] sent 20000 / 25000
+[sender-17] sent 10000 / 25000
+[sender-17] sent 20000 / 25000
+[sender-3] sent 10000 / 25000
+[sender-15] sent 10000 / 25000
+[sender-3] sent 20000 / 25000
+[sender-15] sent 20000 / 25000
+[sender-1] sent 10000 / 25000
+[sender-1] sent 20000 / 25000
+[sender-14] sent 10000 / 25000
+[sender-5] sent 10000 / 25000

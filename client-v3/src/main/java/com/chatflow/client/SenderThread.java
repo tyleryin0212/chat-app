@@ -116,7 +116,11 @@ public class SenderThread implements Runnable {
     }
 
     private void closeAllConnections() {
-        connections.forEach((roomId, ws) -> { if (!ws.isClosed()) ws.close(); });
+        connections.forEach((roomId, ws) -> {
+            if (!ws.isClosed()) {
+                try { ws.closeBlocking(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            }
+        });
     }
 
     private String extractRoomId(String rawMsg) {

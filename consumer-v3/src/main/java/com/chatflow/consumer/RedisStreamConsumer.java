@@ -43,6 +43,10 @@ public class RedisStreamConsumer implements Runnable {
     private final AtomicLong duplicatesSkipped = new AtomicLong(0);
     private final AtomicLong errors            = new AtomicLong(0);
 
+    // pipeline checkpoint 3: consumed from Redis stream
+    private static final long LOG_INTERVAL_MS = 10_000;
+    private long lastLogMs = System.currentTimeMillis();
+
     public RedisStreamConsumer(String roomId, JedisPool jedisPool,
                                BlockingQueue<ChatMessage> writeBuffer, String consumerName) {
         this.roomId       = roomId;
@@ -60,6 +64,10 @@ public class RedisStreamConsumer implements Runnable {
             try (Jedis jedis = jedisPool.getResource()) {
                 System.out.println("RedisStreamConsumer ready | room=" + roomId + " | consumer=" + consumerName);
 
+                // Reclaim any entries delivered but not ACKed by a previous run of this consumer.
+                // Must drain PEL (ID "0-0") before switching to new entries (">").
+                reclaimPending(jedis);
+
                 while (!Thread.currentThread().isInterrupted()) {
                     // XREADGROUP GROUP db-writers <consumerName> COUNT 100 BLOCK 1000 STREAMS room-stream:<roomId> >
                     List<Map.Entry<String, List<StreamEntry>>> results = jedis.xreadGroup(
@@ -75,8 +83,17 @@ public class RedisStreamConsumer implements Runnable {
                             processEntry(jedis, entry);
                         }
                     }
+
+                    long now = System.currentTimeMillis();
+                    if (now - lastLogMs >= LOG_INTERVAL_MS) {
+                        System.out.printf("[StreamConsumer room=%s] checkpoint-3: processed=%d duplicates=%d errors=%d%n",
+                                roomId, messagesProcessed.get(), duplicatesSkipped.get(), errors.get());
+                        lastLogMs = now;
+                    }
                 }
 
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt(); // restore flag — exits outer while loop
             } catch (Exception e) {
                 if (!Thread.currentThread().isInterrupted()) {
                     System.out.println("RedisStreamConsumer disconnected | room=" + roomId + " | " + e.getMessage() + " — reconnecting in 2s");
@@ -86,7 +103,33 @@ public class RedisStreamConsumer implements Runnable {
         }
     }
 
-    private void processEntry(Jedis jedis, StreamEntry entry) {
+    /**
+     * Drains the consumer's PEL (pending entry list) by reading with ID "0-0".
+     * Called once per connection, before switching to ">" (new entries only).
+     * Handles entries that were delivered but not ACKed by a previous run.
+     */
+    private void reclaimPending(Jedis jedis) throws InterruptedException {
+        int reclaimed = 0;
+        while (!Thread.currentThread().isInterrupted()) {
+            List<Map.Entry<String, List<StreamEntry>>> pending = jedis.xreadGroup(
+                GROUP_NAME, consumerName,
+                XReadGroupParams.xReadGroupParams().count(BATCH_SIZE),
+                Map.of(streamKey, new StreamEntryID(0, 0))
+            );
+            if (pending == null || pending.isEmpty()) break;
+            for (Map.Entry<String, List<StreamEntry>> streamResult : pending) {
+                for (StreamEntry entry : streamResult.getValue()) {
+                    processEntry(jedis, entry);
+                    reclaimed++;
+                }
+            }
+        }
+        if (reclaimed > 0) {
+            System.out.printf("[StreamConsumer room=%s] reclaimed %d pending entries%n", roomId, reclaimed);
+        }
+    }
+
+    private void processEntry(Jedis jedis, StreamEntry entry) throws InterruptedException {
         String json = entry.getFields().get("data");
         try {
             String messageId = mapper.readTree(json).path("messageId").asText();
@@ -100,15 +143,13 @@ public class RedisStreamConsumer implements Runnable {
 
             ChatMessage msg = mapper.readValue(json, ChatMessage.class);
 
-            if (writeBuffer.offer(msg)) {
-                // Safe to ack — message is now in the write buffer headed to DB
-                jedis.xack(streamKey, GROUP_NAME, entry.getID());
-                messagesProcessed.incrementAndGet();
-            } else {
-                // Buffer full — do NOT ack. Entry stays pending in the stream and
-                // will be reclaimed on restart via XPENDING, replacing the old DLQ.
-                System.out.println("[WARN] Write buffer full — not acking entry " + entry.getID() + " room=" + roomId);
-            }
+            // Blocking put — if writeBuffer is full, this thread blocks until
+            // a BatchWriter drains space. This propagates backpressure to Redis:
+            // consumers stop reading the stream, which stays the backpressure buffer.
+            // No messages are dropped or stuck in the PEL.
+            writeBuffer.put(msg);
+            jedis.xack(streamKey, GROUP_NAME, entry.getID());
+            messagesProcessed.incrementAndGet();
 
         } catch (Exception e) {
             errors.incrementAndGet();
@@ -116,6 +157,10 @@ public class RedisStreamConsumer implements Runnable {
             // Do not ack — entry stays pending for recovery
         }
     }
+
+    public long getMessagesProcessed() { return messagesProcessed.get(); }
+    public long getDuplicatesSkipped() { return duplicatesSkipped.get(); }
+    public long getErrors()            { return errors.get(); }
 
     private void ensureGroupExists() {
         try (Jedis jedis = jedisPool.getResource()) {

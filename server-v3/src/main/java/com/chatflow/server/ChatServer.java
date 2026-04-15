@@ -13,6 +13,7 @@ import java.net.InetSocketAddress;
 import java.time.Instant;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class ChatServer extends WebSocketServer {
 
@@ -22,6 +23,13 @@ public class ChatServer extends WebSocketServer {
     private final RoomSessionManager sessionManager;
     private final AtomicInteger activeConnections = new AtomicInteger(0);
     private final String serverId;
+
+    // pipeline checkpoint 1: server intake
+    private final AtomicLong msgsReceived       = new AtomicLong();
+    private final AtomicLong msgsEnqueued        = new AtomicLong();
+    private final AtomicLong msgsFailedValidation = new AtomicLong();
+    private final AtomicLong msgsBufferFull      = new AtomicLong();
+    private static final long LOG_EVERY = 10_000;
 
     public ChatServer(int port, BlockingQueue<ChatMessage> publishBuffer, RoomSessionManager sessionManager, String serverId) {
         super(new InetSocketAddress(port), 64);
@@ -46,11 +54,20 @@ public class ChatServer extends WebSocketServer {
             ChatMessage msg = mapper.readValue(rawMessage, ChatMessage.class);
             msg.setServerId(this.serverId);
             msg.setClientIp(ws.getRemoteSocketAddress().getAddress().getHostAddress());
+            msgsReceived.incrementAndGet();
             if (MessageValidator.validate(msg)) {
                 if (!publishBuffer.offer(msg)) {
+                    msgsBufferFull.incrementAndGet();
                     trySend(ws, buildErrorResponse("Server busy — publish buffer full"));
+                } else {
+                    long n = msgsEnqueued.incrementAndGet();
+                    if (n % LOG_EVERY == 0) {
+                        System.out.printf("[ChatServer] checkpoint-1: received=%d enqueued=%d failedValidation=%d bufferFull=%d bufferSize=%d%n",
+                                msgsReceived.get(), n, msgsFailedValidation.get(), msgsBufferFull.get(), publishBuffer.size());
+                    }
                 }
             } else {
+                msgsFailedValidation.incrementAndGet();
                 trySend(ws, buildErrorResponse("Message validation failed"));
             }
         } catch (Exception e) {
@@ -76,6 +93,11 @@ public class ChatServer extends WebSocketServer {
     public void onStart() {
         log.info("ChatFlow WebSocket server started on port {}", getPort());
     }
+
+    public long getMsgsReceived()        { return msgsReceived.get(); }
+    public long getMsgsEnqueued()        { return msgsEnqueued.get(); }
+    public long getMsgsFailedValidation(){ return msgsFailedValidation.get(); }
+    public long getMsgsBufferFull()      { return msgsBufferFull.get(); }
 
     private String extractRoomId(String resourceDescriptor) {
         if (resourceDescriptor != null && resourceDescriptor.startsWith("/chat/")) {
