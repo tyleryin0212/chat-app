@@ -1,0 +1,7 @@
+/Users/tyleryin/Documents/GitHub/chat-app/consumer-v3/src/main/java/com/chatflow/consumer/BatchWriter.java
+/Users/tyleryin/Documents/GitHub/chat-app/consumer-v3/src/main/java/com/chatflow/consumer/ChatMessage.java
+/Users/tyleryin/Documents/GitHub/chat-app/consumer-v3/src/main/java/com/chatflow/consumer/DatabaseConnectionPool.java
+/Users/tyleryin/Documents/GitHub/chat-app/consumer-v3/src/main/java/com/chatflow/consumer/Main.java
+/Users/tyleryin/Documents/GitHub/chat-app/consumer-v3/src/main/java/com/chatflow/consumer/MessageType.java
+/Users/tyleryin/Documents/GitHub/chat-app/consumer-v3/src/main/java/com/chatflow/consumer/RedisStreamConsumer.java
+/Users/tyleryin/Documents/GitHub/chat-app/consumer-v3/src/main/java/com/chatflow/consumer/StatsAggregator.java
