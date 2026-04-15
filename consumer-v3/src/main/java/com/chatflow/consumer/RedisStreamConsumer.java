@@ -116,7 +116,12 @@ public class RedisStreamConsumer implements Runnable {
                 XReadGroupParams.xReadGroupParams().count(BATCH_SIZE),
                 Map.of(streamKey, new StreamEntryID(0, 0))
             );
-            if (pending == null || pending.isEmpty()) break;
+            // Jedis 5.x returns [{stream → []}] (not null/empty) when the PEL is empty.
+            // Must count actual entries — not check the outer list.
+            int entryCount = (pending == null) ? 0 :
+                pending.stream().mapToInt(e -> e.getValue().size()).sum();
+            if (entryCount == 0) break;
+
             for (Map.Entry<String, List<StreamEntry>> streamResult : pending) {
                 for (StreamEntry entry : streamResult.getValue()) {
                     processEntry(jedis, entry);

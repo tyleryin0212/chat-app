@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Drains the publish buffer and batch-publishes to Redis using pipelines.
@@ -22,13 +21,6 @@ public class RedisPublisherWorker implements Runnable {
     private final BlockingQueue<ChatMessage> buffer;
     private final RedisPublisher publisher;
     private final String workerName;
-
-    // pipeline checkpoint 2: published to Redis stream
-    private final AtomicLong totalPublished = new AtomicLong();
-    private final AtomicLong totalFailed    = new AtomicLong();
-
-    public long getTotalPublished() { return totalPublished.get(); }
-    public long getTotalFailed()    { return totalFailed.get(); }
 
     public RedisPublisherWorker(BlockingQueue<ChatMessage> buffer, RedisPublisher publisher, String workerName) {
         this.buffer     = buffer;
@@ -53,13 +45,9 @@ public class RedisPublisherWorker implements Runnable {
                 if (!batch.isEmpty()) {
                     try {
                         publisher.publishBatch(batch);
-                        long n = totalPublished.addAndGet(batch.size());
-                        System.out.printf("[%s] checkpoint-2: batch=%d totalPublished=%d totalFailed=%d%n",
-                                workerName, batch.size(), n, totalFailed.get());
                     } catch (Exception e) {
-                        totalFailed.addAndGet(batch.size());
-                        System.out.printf("[%s] publish FAILED batch=%d totalFailed=%d: %s%n",
-                                workerName, batch.size(), totalFailed.get(), e.getMessage());
+                        System.out.printf("[%s] publish FAILED batch=%d: %s%n",
+                                workerName, batch.size(), e.getMessage());
                     }
                     batch.clear();
                 }

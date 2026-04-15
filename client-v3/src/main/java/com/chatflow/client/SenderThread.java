@@ -1,37 +1,52 @@
 package com.chatflow.client;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
 
 import java.net.URI;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 public class SenderThread implements Runnable {
 
     private static final int MAX_RETRIES = 5;
+    private static final int DRAIN_MS = 30000;
     private static final ObjectMapper mapper = new ObjectMapper();
 
     private final BlockingQueue<List<String>> queue;
     private final int messagesToSend;
-    private final String serverBaseUrl;
+    private final List<String> serverUrls;
     private final MetricsCollector metrics;
-    private final CountDownLatch latch;
+    private final CountDownLatch sendLatch;
+    private final CountDownLatch closeLatch;
     private final Map<String, WebSocketClient> connections = new HashMap<>();
+    private final Random random = new Random();
 
-    public SenderThread(BlockingQueue<List<String>> queue, int messagesToSend, String serverBaseUrl,
-                        MetricsCollector metrics, CountDownLatch latch) {
+    // messageId → send timestamp; used to measure round-trip latency.
+    // ConcurrentHashMap because onMessage fires on a WebSocket selector thread,
+    // not the sender thread.
+    private final ConcurrentHashMap<String, Long> sentAt = new ConcurrentHashMap<>();
+
+    public SenderThread(BlockingQueue<List<String>> queue, int messagesToSend, List<String> serverUrls,
+                        MetricsCollector metrics, CountDownLatch sendLatch, CountDownLatch closeLatch) {
         this.queue = queue;
         this.messagesToSend = messagesToSend;
-        this.serverBaseUrl = serverBaseUrl;
+        this.serverUrls = Collections.unmodifiableList(serverUrls);
         this.metrics = metrics;
-        this.latch = latch;
+        this.sendLatch = sendLatch;
+        this.closeLatch = closeLatch;
+    }
+
+    private String randomUrl() {
+        return serverUrls.get(random.nextInt(serverUrls.size()));
     }
 
     @Override
@@ -44,9 +59,8 @@ public class SenderThread implements Runnable {
                 String roomId = extractRoomId(session.get(0));
                 WebSocketClient ws = null;
                 try {
-                    ws = getOrCreateConnection(roomId);
+                    ws = getOrCreateConnection(roomId, randomUrl());
                 } catch (Exception e) {
-                    // connection timed out — count session as failed and move on
                     metrics.recordFailure();
                     sent += session.size();
                     continue;
@@ -63,26 +77,37 @@ public class SenderThread implements Runnable {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } finally {
+            sendLatch.countDown();
+            try { Thread.sleep(DRAIN_MS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
             closeAllConnections();
-            latch.countDown();
+            closeLatch.countDown();
         }
     }
 
-    private WebSocketClient getOrCreateConnection(String roomId) throws InterruptedException {
+    private WebSocketClient getOrCreateConnection(String roomId, String baseUrl) throws InterruptedException {
         WebSocketClient ws = connections.get(roomId);
         if (ws == null || ws.isClosed()) {
-            ws = createConnection(roomId);
+            ws = createConnection(roomId, baseUrl);
             connections.put(roomId, ws);
         }
         return ws;
     }
 
-    private WebSocketClient createConnection(String roomId) throws InterruptedException {
-        URI uri = URI.create(serverBaseUrl + roomId);
+    private WebSocketClient createConnection(String roomId, String baseUrl) throws InterruptedException {
+        URI uri = URI.create(baseUrl + roomId);
         CountDownLatch connectLatch = new CountDownLatch(1);
         WebSocketClient ws = new WebSocketClient(uri) {
             @Override public void onOpen(ServerHandshake h) { connectLatch.countDown(); }
-            @Override public void onMessage(String message) { metrics.recordReceived(); }
+            @Override public void onMessage(String message) {
+                metrics.recordReceived();
+                String msgId = extractMessageId(message);
+                if (!msgId.isEmpty()) {
+                    Long sendTime = sentAt.remove(msgId);
+                    if (sendTime != null) {
+                        metrics.recordRoundTrip(System.currentTimeMillis() - sendTime);
+                    }
+                }
+            }
             @Override public void onClose(int code, String reason, boolean remote) {}
             @Override public void onError(Exception ex) {}
         };
@@ -99,12 +124,18 @@ public class SenderThread implements Runnable {
     private boolean sendWithRetry(WebSocketClient ws, String msg, String roomId) throws InterruptedException {
         for (int attempt = 0; attempt < MAX_RETRIES; attempt++) {
             try {
+                // Record send time just before sending so the clock starts
+                // as close to the actual network write as possible.
+                String msgId = extractMessageId(msg);
+                if (!msgId.isEmpty()) {
+                    sentAt.put(msgId, System.currentTimeMillis());
+                }
                 ws.send(msg);
                 return true;
             } catch (Exception e) {
                 Thread.sleep((long) Math.pow(2, attempt) * 100);
                 try {
-                    ws = createConnection(roomId);
+                    ws = createConnection(roomId, randomUrl());
                     connections.put(roomId, ws);
                     metrics.recordReconnection();
                 } catch (Exception ex) {
@@ -125,8 +156,13 @@ public class SenderThread implements Runnable {
 
     private String extractRoomId(String rawMsg) {
         try {
-            JsonNode node = mapper.readTree(rawMsg);
-            return node.get("roomId").asText();
+            return mapper.readTree(rawMsg).get("roomId").asText();
         } catch (Exception e) { return "1"; }
+    }
+
+    private String extractMessageId(String rawMsg) {
+        try {
+            return mapper.readTree(rawMsg).path("messageId").asText("");
+        } catch (Exception e) { return ""; }
     }
 }

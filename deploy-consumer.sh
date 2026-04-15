@@ -5,6 +5,7 @@
 # Prereq: source ec2-hosts.sh
 
 set -e
+cd "$(dirname "$0")"
 
 if [ -z "$CONSUMER_IP" ] || [ -z "$DB_IP" ]; then
     echo "ERROR: run 'source ec2-hosts.sh' first"
@@ -28,8 +29,12 @@ ssh -i $SSH_KEY $SSH_USER@$CONSUMER_IP bash << EOF
 
     # Redis — local to this EC2
     nohup redis6-server ~/redis.conf > redis.log 2>&1 &
-    sleep 2
-    echo "Redis: \$(redis6-cli ping)"
+    # Wait for Redis to finish loading AOF before flushing
+    echo -n "Waiting for Redis..."
+    until redis6-cli ping 2>/dev/null | grep -q PONG; do sleep 1; echo -n "."; done
+    echo " ready"
+    redis6-cli FLUSHALL   # clear any stale AOF data from previous runs
+    echo "Redis flushed"
 
     # Args: redisHost dbHost batchSize flushIntervalMs
     # Redis is local — pass localhost

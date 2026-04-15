@@ -1,11 +1,8 @@
 package com.chatflow.consumer;
 
-import com.sun.net.httpserver.HttpServer;
 import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.JedisPoolConfig;
 
-import java.io.OutputStream;
-import java.net.InetSocketAddress;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -62,42 +59,14 @@ public class Main {
         System.out.println("Stats aggregator started (interval=" + StatsAggregator.intervalSec() + "s)");
 
         // ── Start one stream consumer thread per room ─────────────────────────
-        RedisStreamConsumer[] consumers = new RedisStreamConsumer[TOTAL_ROOMS];
         for (int room = 1; room <= TOTAL_ROOMS; room++) {
             String roomId = String.valueOf(room);
-            consumers[room - 1] = new RedisStreamConsumer(roomId, jedisPool, writeBuffer, "consumer-" + roomId);
-            Thread t = new Thread(consumers[room - 1], "stream-consumer-room-" + roomId);
+            Thread t = new Thread(new RedisStreamConsumer(roomId, jedisPool, writeBuffer, "consumer-" + roomId),
+                    "stream-consumer-room-" + roomId);
             t.setDaemon(true);
             t.start();
         }
         System.out.println("All " + TOTAL_ROOMS + " stream consumers started");
-
-        // ── Consumer stats HTTP server ─────────────────────────────────────────
-        // GET /stats → pipeline checkpoint 3 + DB write stats. Called by client at end of test.
-        HttpServer statsServer = HttpServer.create(new InetSocketAddress(9090), 0);
-        statsServer.createContext("/stats", exchange -> {
-            long consumed = 0, duplicates = 0, consumeErrors = 0;
-            for (RedisStreamConsumer c : consumers) {
-                consumed      += c.getMessagesProcessed();
-                duplicates    += c.getDuplicatesSkipped();
-                consumeErrors += c.getErrors();
-            }
-            long dbWritten = 0, dbBatches = 0, dbErrors = 0;
-            for (BatchWriter w : writers) {
-                dbWritten += w.getTotalWritten();
-                dbBatches += w.getTotalBatches();
-                dbErrors  += w.getWriteErrors();
-            }
-            String json = String.format(
-                "{\"msgsConsumedFromStream\":%d,\"duplicatesSkipped\":%d,\"consumeErrors\":%d,\"msgsWrittenToDB\":%d,\"dbBatches\":%d,\"dbWriteErrors\":%d,\"writeBufferDepth\":%d}",
-                consumed, duplicates, consumeErrors, dbWritten, dbBatches, dbErrors, writeBuffer.size());
-            byte[] response = json.getBytes();
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, response.length);
-            try (OutputStream os = exchange.getResponseBody()) { os.write(response); }
-        });
-        statsServer.start();
-        System.out.println("Consumer stats server started on port 9090");
 
         // ── Shutdown hook ─────────────────────────────────────────────────────
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {

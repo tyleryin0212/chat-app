@@ -5,13 +5,12 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.util.concurrent.Executors;
-import java.util.function.Supplier;
 
 public class AdminServer {
 
     private final HttpServer httpServer;
 
-    public AdminServer(int port, MetricsService metricsService, Supplier<String> pipelineStatsSupplier) throws Exception {
+    public AdminServer(int port, MetricsService metricsService) throws Exception {
         httpServer = HttpServer.create(new InetSocketAddress(port), 100);
 
         // ── GET /health ───────────────────────────────────────────────────────
@@ -32,25 +31,6 @@ public class AdminServer {
             try {
                 String json = metricsService.getMetrics();
                 byte[] response = json.getBytes();
-                exchange.getResponseHeaders().set("Content-Type", "application/json");
-                exchange.sendResponseHeaders(200, response.length);
-                try (OutputStream os = exchange.getResponseBody()) { os.write(response); }
-            } catch (Exception e) {
-                byte[] response = ("{\"error\":\"" + e.getMessage() + "\"}").getBytes();
-                exchange.sendResponseHeaders(500, response.length);
-                try (OutputStream os = exchange.getResponseBody()) { os.write(response); }
-            }
-        });
-
-        // ── GET /pipeline-stats ───────────────────────────────────────────────
-        // Returns server-side pipeline counters: received → enqueued → published to Redis.
-        httpServer.createContext("/pipeline-stats", exchange -> {
-            if (!"GET".equals(exchange.getRequestMethod())) {
-                exchange.sendResponseHeaders(405, -1);
-                return;
-            }
-            try {
-                byte[] response = pipelineStatsSupplier.get().getBytes();
                 exchange.getResponseHeaders().set("Content-Type", "application/json");
                 exchange.sendResponseHeaders(200, response.length);
                 try (OutputStream os = exchange.getResponseBody()) { os.write(response); }
