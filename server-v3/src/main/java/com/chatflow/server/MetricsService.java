@@ -46,11 +46,12 @@ public class MetricsService {
         config.addDataSourceProperty("prepStmtCacheSize", "25");
         this.dataSource = new HikariDataSource(config);
 
-        // ── Redis cache pool (small — just for cache GET/SET) ─────────────────
+        // ── Redis cache pool ──────────────────────────────────────────────────
+        // Sized for concurrent access: /metrics + /api/messages (20 rooms)
         JedisPoolConfig jedisConfig = new JedisPoolConfig();
-        jedisConfig.setMaxTotal(5);
-        jedisConfig.setMaxIdle(2);
-        jedisConfig.setMinIdle(1);
+        jedisConfig.setMaxTotal(20);
+        jedisConfig.setMaxIdle(5);
+        jedisConfig.setMinIdle(2);
         this.jedisPool = new JedisPool(jedisConfig, redisHost, 6379);
 
         System.out.println("MetricsService initialized — db=" + dbHost + " redis=" + redisHost);
@@ -214,6 +215,55 @@ public class MetricsService {
         try (Statement st = conn.createStatement();
              ResultSet rs = st.executeQuery(sql)) {
             return rs.next() ? rs.getString(1) : null;
+        }
+    }
+
+    /**
+     * Returns the 100 most recent messages for the given roomId as a JSON array.
+     * Cached per-room in Redis with 10s TTL — at most 1 DB query per room per 10s.
+     */
+    public String getRecentMessages(String roomId) throws Exception {
+        String cacheKey = "messages:cache:" + roomId;
+
+        // ── Cache check ───────────────────────────────────────────────────────
+        try (Jedis jedis = jedisPool.getResource()) {
+            String cached = jedis.get(cacheKey);
+            if (cached != null) return cached;
+        } catch (Exception e) {
+            System.out.println("Redis cache read failed for room " + roomId + ": " + e.getMessage());
+        }
+
+        // ── Cache miss — query DB ─────────────────────────────────────────────
+        String fresh = queryRecentMessages(roomId);
+
+        try (Jedis jedis = jedisPool.getResource()) {
+            jedis.setex(cacheKey, CACHE_TTL_SEC, fresh);
+        } catch (Exception e) {
+            System.out.println("Redis cache write failed for room " + roomId + ": " + e.getMessage());
+        }
+
+        return fresh;
+    }
+
+    private String queryRecentMessages(String roomId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT message_id, user_id, username, message, timestamp " +
+                     "FROM messages WHERE room_id = ? " +
+                     "ORDER BY timestamp DESC LIMIT 100")) {
+            ps.setString(1, roomId);
+            ResultSet rs = ps.executeQuery();
+            ArrayNode messages = mapper.createArrayNode();
+            while (rs.next()) {
+                ObjectNode m = mapper.createObjectNode();
+                m.put("messageId", rs.getString("message_id"));
+                m.put("userId",    rs.getString("user_id"));
+                m.put("username",  rs.getString("username"));
+                m.put("message",   rs.getString("message"));
+                m.put("timestamp", rs.getTimestamp("timestamp").toInstant().toString());
+                messages.add(m);
+            }
+            return mapper.writeValueAsString(messages);
         }
     }
 

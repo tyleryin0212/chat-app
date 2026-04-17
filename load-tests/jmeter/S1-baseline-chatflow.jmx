@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="S1 Baseline — 700 threads, 5 min (ChatFlow)" enabled="true">
+      <stringProp name="TestPlan.comments">Scenario S1: 1000 concurrent users, 5 min, 70% reads / 30% writes.
+TG1 (700 threads): GET /metrics (80%), GET /health (20%) — capped at 20000 req/min (~100K in 5 min).
+TG2 (300 threads): WebSocket TEXT messages to ALB — capped at 8000 req/min.
+Run: jmeter -n -t S1-baseline-chatflow.jmx -Jserver.host=35.93.148.105 -Jserver.port=8081 -Jalb.host=chatflow-alb-14549874.us-west-2.elb.amazonaws.com -l results-S1.jtl</stringProp>
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="User Defined Variables" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <!-- Server admin host — server-v3 AdminServer (port+1 = 8081) -->
+          <elementProp name="SERVER_HOST" elementType="Argument">
+            <stringProp name="Argument.name">SERVER_HOST</stringProp>
+            <stringProp name="Argument.value">${__P(server.host,35.93.148.105)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <!-- Admin port (main port + 1, e.g. 8081 when server runs on 8080) -->
+          <elementProp name="SERVER_PORT" elementType="Argument">
+            <stringProp name="Argument.name">SERVER_PORT</stringProp>
+            <stringProp name="Argument.value">${__P(server.port,8081)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <!-- ALB DNS — used only for write pressure in TG2 (disabled) -->
+          <elementProp name="ALB_HOST" elementType="Argument">
+            <stringProp name="Argument.name">ALB_HOST</stringProp>
+            <stringProp name="Argument.value">${__P(alb.host,chatflow-alb-14549874.us-west-2.elb.amazonaws.com)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+    </TestPlan>
+    <hashTree>
+
+      <!-- ================================================================
+           THREAD GROUP 1: API Reads — 700 threads, 5 min
+           Targets ChatFlow AdminServer on SERVER_HOST:SERVER_PORT (8081)
+           Endpoints:
+             100% → GET /metrics  (Redis-cached analytics snapshot)
+           ================================================================ -->
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="TG1 API Reads (700 threads)" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Loop Controller" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <intProp name="LoopController.loops">-1</intProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">700</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">60</stringProp>
+        <boolProp name="ThreadGroup.scheduler">true</boolProp>
+        <stringProp name="ThreadGroup.duration">300</stringProp>
+        <stringProp name="ThreadGroup.delay">0</stringProp>
+      </ThreadGroup>
+      <hashTree>
+
+        <!-- HTTP Request Defaults — all requests go to AdminServer -->
+        <ConfigTestElement guiclass="HttpDefaultsGui" testclass="ConfigTestElement" testname="HTTP Defaults — AdminServer :8081" enabled="true">
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables" enabled="true">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
+          <stringProp name="HTTPSampler.domain">${SERVER_HOST}</stringProp>
+          <stringProp name="HTTPSampler.port">${SERVER_PORT}</stringProp>
+          <stringProp name="HTTPSampler.protocol">http</stringProp>
+          <stringProp name="HTTPSampler.connect_timeout">20000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">15000</stringProp>
+          <boolProp name="HTTPSampler.use_keepalive">false</boolProp>
+        </ConfigTestElement>
+        <hashTree/>
+
+        <!-- Constant Throughput Timer — caps total TG1 rate at 20,000 req/min
+             so that 5 min ≈ 100K total API calls (matches baseline spec).
+             calcMode=1: applies to all active threads in this thread group. -->
+        <ConstantThroughputTimer guiclass="TestBeanGUI" testclass="ConstantThroughputTimer" testname="Throughput Cap — 20000 req/min (≈100K in 5 min)" enabled="true">
+          <intProp name="calcMode">1</intProp>
+          <doubleProp>
+            <name>throughput</name>
+            <value>20000.0</value>
+          </doubleProp>
+        </ConstantThroughputTimer>
+        <hashTree/>
+
+        <!-- 100%: Full Metrics Snapshot (Redis-cached, DB on miss, 10s TTL) -->
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="GET /metrics" enabled="true">
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables" enabled="true">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
+          <stringProp name="HTTPSampler.path">/metrics</stringProp>
+          <stringProp name="HTTPSampler.method">GET</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">false</boolProp>
+          <boolProp name="HTTPSampler.postBodyRaw">false</boolProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert 200" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="49586">200</stringProp>
+            </collectionProp>
+            <stringProp name="Assertion.custom_message"></stringProp>
+            <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
+            <intProp name="Assertion.test_type">8</intProp>
+          </ResponseAssertion>
+          <hashTree/>
+        </hashTree>
+
+        <!-- JTL Results -->
+        <ResultCollector guiclass="SimpleDataWriter" testclass="ResultCollector" testname="Save Results (JTL)" enabled="true">
+          <boolProp name="ResultCollector.error_logging">false</boolProp>
+          <objProp>
+            <name>saveConfig</name>
+            <value class="SampleSaveConfiguration">
+              <time>true</time>
+              <latency>true</latency>
+              <timestamp>true</timestamp>
+              <success>true</success>
+              <label>true</label>
+              <code>true</code>
+              <message>true</message>
+              <threadName>true</threadName>
+              <dataType>true</dataType>
+              <encoding>false</encoding>
+              <assertions>true</assertions>
+              <subresults>true</subresults>
+              <responseData>false</responseData>
+              <samplerData>false</samplerData>
+              <xml>false</xml>
+              <fieldNames>true</fieldNames>
+              <responseHeaders>false</responseHeaders>
+              <requestHeaders>false</requestHeaders>
+              <responseDataOnError>false</responseDataOnError>
+              <saveAssertionResultsFailureMessage>true</saveAssertionResultsFailureMessage>
+              <assertionsResultsToSave>0</assertionsResultsToSave>
+              <bytes>true</bytes>
+              <sentBytes>true</sentBytes>
+              <url>true</url>
+              <threadCounts>true</threadCounts>
+              <idleTime>true</idleTime>
+              <connectTime>true</connectTime>
+            </value>
+          </objProp>
+          <stringProp name="filename">${__P(jtl.file,results-S1.jtl)}</stringProp>
+        </ResultCollector>
+        <hashTree/>
+
+      </hashTree>
+
+      <!-- ================================================================
+           THREAD GROUP 2: WebSocket Writes — 300 threads, 5 min
+           Requires: jmeter-websocket-samplers plugin (Peter Doornbosch)
+           Each thread opens one persistent WS connection to the ALB,
+           then fires TEXT messages in a loop.
+           Throughput cap: 8000 req/min → combined with TG1's 20000 = ~29% writes ≈ 30/70 split.
+           ================================================================ -->
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="TG2 WS Writes (300 threads)" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Loop Controller" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <intProp name="LoopController.loops">-1</intProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">300</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">60</stringProp>
+        <boolProp name="ThreadGroup.scheduler">true</boolProp>
+        <stringProp name="ThreadGroup.duration">300</stringProp>
+        <stringProp name="ThreadGroup.delay">0</stringProp>
+      </ThreadGroup>
+      <hashTree>
+
+        <!-- Constant Throughput Timer — caps TG2 at 8000 req/min (~133/sec).
+             Combined with TG1 20000 req/min → ~29% writes, ~71% reads ≈ 30/70. -->
+        <ConstantThroughputTimer guiclass="TestBeanGUI" testclass="ConstantThroughputTimer" testname="Throughput Cap — 8000 req/min (writes)" enabled="true">
+          <intProp name="calcMode">1</intProp>
+          <doubleProp>
+            <name>throughput</name>
+            <value>8000.0</value>
+          </doubleProp>
+        </ConstantThroughputTimer>
+        <hashTree/>
+
+        <!-- Open WebSocket connection once per thread (reused for all iterations) -->
+        <OnceOnlyController guiclass="OnceOnlyControllerGui" testclass="OnceOnlyController" testname="Once Only — Open WS Connection" enabled="true"/>
+        <hashTree>
+          <eu.luminis.jmeter.wssampler.OpenWebSocketSampler guiclass="eu.luminis.jmeter.wssampler.OpenWebSocketSamplerUI" testclass="eu.luminis.jmeter.wssampler.OpenWebSocketSampler" testname="Open WS — ALB :80 /chat/" enabled="true">
+            <stringProp name="server">${ALB_HOST}</stringProp>
+            <stringProp name="port">80</stringProp>
+            <stringProp name="path">/chat/</stringProp>
+            <stringProp name="connectTimeout">6000</stringProp>
+            <boolProp name="TLS">false</boolProp>
+          </eu.luminis.jmeter.wssampler.OpenWebSocketSampler>
+          <hashTree/>
+        </hashTree>
+
+        <!-- Send one TEXT message per iteration over the persistent connection -->
+        <eu.luminis.jmeter.wssampler.SingleWriteWebSocketSampler guiclass="eu.luminis.jmeter.wssampler.SingleWriteWebSocketSamplerUI" testclass="eu.luminis.jmeter.wssampler.SingleWriteWebSocketSampler" testname="Send Chat Message (TEXT)" enabled="true">
+          <stringProp name="requestData">{"messageId":"${__UUID()}","roomId":"${__Random(1,20,)}","userId":"${__Random(1,100000,)}","username":"user${__Random(100,999,)}","message":"jmeter load test ${__Random(1,99999,)}","messageType":"TEXT","timestamp":"${__time(yyyy-MM-dd'T'HH:mm:ss.SSS'Z',)}"}</stringProp>
+          <boolProp name="binary">false</boolProp>
+        </eu.luminis.jmeter.wssampler.SingleWriteWebSocketSampler>
+        <hashTree/>
+
+      </hashTree>
+
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>
