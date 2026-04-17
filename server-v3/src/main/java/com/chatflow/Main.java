@@ -34,7 +34,7 @@ public class Main {
         redisSubscriber.start();
 
         // ── Metrics service (queries EC2 PostgreSQL) ──────────────────────────
-        MetricsService metricsService = new MetricsService(dbHost);
+        MetricsService metricsService = new MetricsService(dbHost, redisHost);
 
         // ── Publish buffer + worker threads ───────────────────────────────────
         BlockingQueue<ChatMessage> publishBuffer = new LinkedBlockingQueue<>(1000_000);

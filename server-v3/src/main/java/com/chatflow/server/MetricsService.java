@@ -5,33 +5,39 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.JedisPoolConfig;
 
 import java.sql.*;
 import java.time.Instant;
 
 /**
  * Queries PostgreSQL and returns a JSON metrics snapshot.
- * Uses HikariCP connection pool (avoids new connection per request).
- * Caches the result for 10 seconds (avoids re-running expensive queries on every request).
+ * Uses HikariCP for DB connection pooling and Redis for shared caching.
+ *
+ * Cache strategy:
+ *   - GET metrics:cache from Redis → return immediately if hit (~1ms)
+ *   - On miss: run DB queries, SETEX metrics:cache 10 <json>
+ *   - Both servers share the same cache — DB queried at most once per 10s total
  */
 public class MetricsService {
 
-    private static final int    POOL_SIZE  = 5;
-    private static final long   CACHE_TTL_MS = 10_000; // 10 seconds
+    private static final int    DB_POOL_SIZE  = 5;
+    private static final String CACHE_KEY     = "metrics:cache";
+    private static final int    CACHE_TTL_SEC = 10;
 
     private final HikariDataSource dataSource;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final JedisPool        jedisPool;
+    private final ObjectMapper     mapper = new ObjectMapper();
 
-    // In-memory cache — volatile so all threads see updates immediately
-    private volatile String cachedMetrics = null;
-    private volatile long   cacheExpiry   = 0;
-
-    public MetricsService(String dbHost) {
+    public MetricsService(String dbHost, String redisHost) {
+        // ── PostgreSQL connection pool ─────────────────────────────────────────
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl("jdbc:postgresql://" + dbHost + ":5432/chatdb");
         config.setUsername("chatflow");
         config.setPassword("123456");
-        config.setMaximumPoolSize(POOL_SIZE);
+        config.setMaximumPoolSize(DB_POOL_SIZE);
         config.setMinimumIdle(2);
         config.setConnectionTimeout(30_000);
         config.setIdleTimeout(600_000);
@@ -39,24 +45,41 @@ public class MetricsService {
         config.addDataSourceProperty("cachePrepStmts", "true");
         config.addDataSourceProperty("prepStmtCacheSize", "25");
         this.dataSource = new HikariDataSource(config);
-        System.out.println("MetricsService pool initialized: " + POOL_SIZE + " connections to " + dbHost);
+
+        // ── Redis cache pool (small — just for cache GET/SET) ─────────────────
+        JedisPoolConfig jedisConfig = new JedisPoolConfig();
+        jedisConfig.setMaxTotal(5);
+        jedisConfig.setMaxIdle(2);
+        jedisConfig.setMinIdle(1);
+        this.jedisPool = new JedisPool(jedisConfig, redisHost, 6379);
+
+        System.out.println("MetricsService initialized — db=" + dbHost + " redis=" + redisHost);
     }
 
     /**
-     * Returns cached metrics JSON if still fresh, otherwise re-queries PostgreSQL.
-     * Under concurrent load, all threads share one cached result — DB is queried
-     * at most once every 10 seconds regardless of request volume.
+     * Returns cached JSON from Redis if available, otherwise queries PostgreSQL,
+     * stores the result in Redis with a 10s TTL, and returns it.
      */
     public String getMetrics() throws Exception {
-        long now = System.currentTimeMillis();
-        if (cachedMetrics != null && now < cacheExpiry) {
-            return cachedMetrics; // cache hit — no DB call
+        // ── Cache check ───────────────────────────────────────────────────────
+        try (Jedis jedis = jedisPool.getResource()) {
+            String cached = jedis.get(CACHE_KEY);
+            if (cached != null) {
+                return cached; // cache hit — no DB call
+            }
+        } catch (Exception e) {
+            System.out.println("Redis cache read failed, falling back to DB: " + e.getMessage());
         }
 
-        // Cache miss — run queries and refresh
+        // ── Cache miss — query DB ─────────────────────────────────────────────
         String fresh = runAllQueries();
-        cachedMetrics = fresh;
-        cacheExpiry   = System.currentTimeMillis() + CACHE_TTL_MS;
+
+        try (Jedis jedis = jedisPool.getResource()) {
+            jedis.setex(CACHE_KEY, CACHE_TTL_SEC, fresh);
+        } catch (Exception e) {
+            System.out.println("Redis cache write failed: " + e.getMessage());
+        }
+
         return fresh;
     }
 
@@ -196,5 +219,6 @@ public class MetricsService {
 
     public void close() {
         dataSource.close();
+        jedisPool.close();
     }
 }
