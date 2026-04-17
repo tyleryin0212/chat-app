@@ -3,31 +3,65 @@ package com.chatflow.server;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
 
 import java.sql.*;
 import java.time.Instant;
 
 /**
  * Queries PostgreSQL and returns a JSON metrics snapshot.
- * Called by GET /metrics after a load test completes.
+ * Uses HikariCP connection pool (avoids new connection per request).
+ * Caches the result for 10 seconds (avoids re-running expensive queries on every request).
  */
 public class MetricsService {
 
-    private final String jdbcUrl;
-    private final String dbUser = "chatflow";
-    private final String dbPassword = "123456";
+    private static final int    POOL_SIZE  = 5;
+    private static final long   CACHE_TTL_MS = 10_000; // 10 seconds
+
+    private final HikariDataSource dataSource;
     private final ObjectMapper mapper = new ObjectMapper();
 
+    // In-memory cache — volatile so all threads see updates immediately
+    private volatile String cachedMetrics = null;
+    private volatile long   cacheExpiry   = 0;
+
     public MetricsService(String dbHost) {
-        this.jdbcUrl = "jdbc:postgresql://" + dbHost + ":5432/chatdb";
-        System.out.println("MetricsService configured: " + jdbcUrl);
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl("jdbc:postgresql://" + dbHost + ":5432/chatdb");
+        config.setUsername("chatflow");
+        config.setPassword("123456");
+        config.setMaximumPoolSize(POOL_SIZE);
+        config.setMinimumIdle(2);
+        config.setConnectionTimeout(30_000);
+        config.setIdleTimeout(600_000);
+        config.setMaxLifetime(1_800_000);
+        config.addDataSourceProperty("cachePrepStmts", "true");
+        config.addDataSourceProperty("prepStmtCacheSize", "25");
+        this.dataSource = new HikariDataSource(config);
+        System.out.println("MetricsService pool initialized: " + POOL_SIZE + " connections to " + dbHost);
     }
 
     /**
-     * Runs all core and analytics queries and returns a single JSON string.
+     * Returns cached metrics JSON if still fresh, otherwise re-queries PostgreSQL.
+     * Under concurrent load, all threads share one cached result — DB is queried
+     * at most once every 10 seconds regardless of request volume.
      */
     public String getMetrics() throws Exception {
-        try (Connection conn = DriverManager.getConnection(jdbcUrl, dbUser, dbPassword)) {
+        long now = System.currentTimeMillis();
+        if (cachedMetrics != null && now < cacheExpiry) {
+            return cachedMetrics; // cache hit — no DB call
+        }
+
+        // Cache miss — run queries and refresh
+        String fresh = runAllQueries();
+        cachedMetrics = fresh;
+        cacheExpiry   = System.currentTimeMillis() + CACHE_TTL_MS;
+        return fresh;
+    }
+
+    private String runAllQueries() throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
             ObjectNode result = mapper.createObjectNode();
             result.put("queriedAt", Instant.now().toString());
 
@@ -44,12 +78,12 @@ public class MetricsService {
             }
             result.set("messagesByType", byType);
 
-            // ── Core query 3: active users in last hour ───────────────────────
+            // ── Active users in last hour ─────────────────────────────────────
             result.put("activeUsersLastHour", queryLong(conn,
                     "SELECT COUNT(DISTINCT user_id) FROM messages " +
                     "WHERE timestamp >= NOW() - INTERVAL '1 hour'"));
 
-            // ── Core query 4 example: rooms for the most active user ──────────
+            // ── Top user and their rooms ──────────────────────────────────────
             String topUserId = queryString(conn,
                     "SELECT user_id FROM messages GROUP BY user_id ORDER BY COUNT(*) DESC LIMIT 1");
             if (topUserId != null) {
@@ -73,7 +107,7 @@ public class MetricsService {
                 result.set("topUserRooms", topUserRooms);
             }
 
-            // ── Analytics: top 10 active users ───────────────────────────────
+            // ── Top 10 active users ───────────────────────────────────────────
             ArrayNode topUsers = mapper.createArrayNode();
             try (PreparedStatement ps = conn.prepareStatement(
                     "SELECT user_id, username, COUNT(*) as msg_count " +
@@ -90,7 +124,7 @@ public class MetricsService {
             }
             result.set("topUsers", topUsers);
 
-            // ── Analytics: top 10 active rooms ───────────────────────────────
+            // ── Top 10 active rooms ───────────────────────────────────────────
             ArrayNode topRooms = mapper.createArrayNode();
             try (PreparedStatement ps = conn.prepareStatement(
                     "SELECT room_id, COUNT(*) as msg_count " +
@@ -106,7 +140,7 @@ public class MetricsService {
             }
             result.set("topRooms", topRooms);
 
-            // ── Analytics: messages per minute (last 30 min) ──────────────────
+            // ── Messages per minute (last 30 min) ─────────────────────────────
             ArrayNode perMinute = mapper.createArrayNode();
             try (PreparedStatement ps = conn.prepareStatement(
                     "SELECT DATE_TRUNC('minute', timestamp) as minute, COUNT(*) as count " +
@@ -122,7 +156,7 @@ public class MetricsService {
             }
             result.set("messagesPerMinute", perMinute);
 
-            // ── Core query 1 example: room 1 messages, last 5 min ────────────
+            // ── Room 1 recent messages (last 5 min) ───────────────────────────
             ArrayNode recentRoom1 = mapper.createArrayNode();
             try (PreparedStatement ps = conn.prepareStatement(
                     "SELECT message_id, user_id, username, message, timestamp " +
@@ -158,5 +192,9 @@ public class MetricsService {
              ResultSet rs = st.executeQuery(sql)) {
             return rs.next() ? rs.getString(1) : null;
         }
+    }
+
+    public void close() {
+        dataSource.close();
     }
 }

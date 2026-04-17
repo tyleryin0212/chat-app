@@ -26,7 +26,7 @@ deploy_server() {
         pkill -f 'server-v3' || true
         pkill redis6-server   || true
         sleep 1
-        nohup java -jar ~/server-v3.jar 8080 $ID $REDIS_IP $DB_IP > server-8080.log 2>&1 &
+        nohup java -Xmx700m -Xms256m -jar ~/server-v3.jar 8080 $ID $REDIS_IP $DB_IP > server-8080.log 2>&1 &
         sleep 3
         echo "Processes running on $IP:"
         pgrep -a -f server-v3

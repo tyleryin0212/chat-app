@@ -15,6 +15,12 @@ echo "=== Deploying Redis to $REDIS_IP ==="
 scp -i $SSH_KEY redis.conf $SSH_USER@$REDIS_IP:~/redis.conf
 
 ssh -i $SSH_KEY $SSH_USER@$REDIS_IP bash << EOF
+    # Install redis6 if not already present (Amazon Linux 2023)
+    if ! command -v redis6-server &>/dev/null; then
+        echo "Installing redis6..."
+        sudo dnf install -y redis6
+    fi
+
     pkill redis6-server || true
     sleep 1
     nohup redis6-server ~/redis.conf > redis.log 2>&1 &
